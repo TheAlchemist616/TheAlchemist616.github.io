@@ -117,42 +117,166 @@
     border-top: 1px solid #2a2a3e;
   }
   .footer a { color: #00d4ff; text-decoration: none; }
+
+  /* Steps list */
+  .steps {
+    padding-left: 20px;
+    margin-bottom: 12px;
+  }
+  .steps li {
+    color: #bbb;
+    font-size: 14px;
+    line-height: 1.8;
+  }
+  .steps a {
+    color: #00d4ff;
+    text-decoration: none;
+  }
+
+  /* Sub-headings in cards */
+  .card h3 {
+    color: #ccc;
+    font-size: 14px;
+    margin: 16px 0 8px;
+    padding-top: 12px;
+    border-top: 1px solid #2a2a3e;
+  }
+  .card h3:first-of-type {
+    margin-top: 4px;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  /* Code block */
+  .code-block {
+    display: block;
+    background: #2a2a3e;
+    color: #00d4ff;
+    padding: 10px 14px;
+    border-radius: 4px;
+    font-size: 12px;
+    margin-bottom: 12px;
+    overflow-x: auto;
+    word-break: break-all;
+  }
+
+  /* Bandwidth table */
+  .bw-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 12px;
+  }
+  .bw-table th {
+    text-align: left;
+    color: #00d4ff;
+    font-size: 13px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #3a3a4e;
+  }
+  .bw-table td {
+    color: #bbb;
+    font-size: 13px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #2a2a3e;
+  }
 </style>
 </head>
 <body>
 
 <div class="container">
   <h1>Multi-Stream Race Overlay</h1>
-  <p class="subtitle">Free browser-based Twitch multi-stream overlays for OBS. No installs needed.</p>
+  <p class="subtitle">Free browser-based Twitch multi-stream overlays for race restreams. Add as an OBS Browser Source — no installs needed.</p>
 
+  <!-- Quick Start -->
+  <div class="card">
+    <h2>Quick Start</h2>
+    <ol class="steps">
+      <li>Open the <a href="overlay.html">Interactive Editor</a> in your browser</li>
+      <li>Press <strong>E</strong> to enter edit mode</li>
+      <li>Pick a preset layout, type in channel names, adjust panels</li>
+      <li>Click <strong>Export as URL</strong> to copy the configured link</li>
+      <li>In OBS, add a <strong>Browser Source</strong> &rarr; paste the URL &rarr; set to <strong>1920&times;1080</strong></li>
+    </ol>
+  </div>
+
+  <!-- Interactive Editor -->
   <div class="card">
     <h2>Interactive Editor</h2>
-    <p>Full drag-and-drop overlay editor. Move, resize, zoom, and crop each stream panel while watching live. Export your layout as a URL and paste it into OBS.</p>
+    <p>Full drag-and-drop overlay editor. Press <strong>E</strong> to toggle edit mode. You get a sidebar with all controls and a visible 1920&times;1080 canvas grid.</p>
+
+    <h3>Layout Controls</h3>
     <div class="features">
-      <div class="feature"><strong>Drag & resize</strong> panels freely on a 1920x1080 canvas</div>
-      <div class="feature"><strong>Crop mode</strong> — zoom/pan each stream while it plays live</div>
-      <div class="feature"><strong>Preset layouts</strong> — 2 to 24 stream grids in one click</div>
-      <div class="feature"><strong>URL export</strong> — share layouts with a single link</div>
+      <div class="feature"><strong>Preset buttons</strong> — quickly set up 2, 3, 4, 6, 8, 10, 12, 16, or 24 stream grids</div>
+      <div class="feature"><strong>+ Add Stream</strong> — add a panel manually to the canvas</div>
+      <div class="feature"><strong>Drag</strong> a panel to move it anywhere on the canvas</div>
+      <div class="feature"><strong>Resize handles</strong> — drag corners/edges to resize (hold <strong>Shift</strong> to lock 16:9)</div>
+      <div class="feature"><strong>Channel names</strong> — editable in the sidebar stream list or detail panel</div>
+      <div class="feature"><strong>Delete</strong> key or button to remove a panel</div>
     </div>
+
+    <h3>Crop Mode (Zoom/Pan)</h3>
+    <p>Select a panel, then click <strong>Enter Crop Mode</strong> in the sidebar. The stream plays live while you adjust what part of it is visible:</p>
+    <div class="features">
+      <div class="feature"><strong>Scroll wheel</strong> — zoom in/out (1x to 4x)</div>
+      <div class="feature"><strong>Drag</strong> on the stream — pan to frame the area you want</div>
+      <div class="feature"><strong>Escape</strong> or button to exit crop mode</div>
+      <div class="feature">In regular edit mode: <strong>Shift+drag</strong> to pan, <strong>scroll</strong> to zoom</div>
+    </div>
+
+    <h3>Saving & Sharing</h3>
+    <div class="features">
+      <div class="feature"><strong>Auto-saves</strong> to browser localStorage on every change</div>
+      <div class="feature"><strong>Export as URL</strong> — shareable link with layout encoded in the URL hash</div>
+      <div class="feature"><strong>Copy Config JSON</strong> — raw config for backup</div>
+      <div class="feature">Open an exported URL on <strong>any machine</strong> to load that exact layout</div>
+    </div>
+
     <a href="overlay.html" class="btn">Open Editor</a>
   </div>
 
+  <!-- Static Overlays -->
   <div class="card">
-    <h2>Static Overlays</h2>
-    <p>Simple fixed-grid layouts. Add <code>?channels=user1,user2,...</code> to set channel names.</p>
+    <h2>Static Overlay Files</h2>
+    <p>Simple fixed-grid alternatives if you don't need the full editor. Set channel names via URL parameter:</p>
+    <code class="code-block">thealchemist616.github.io/6-streams.html?channels=user1,user2,user3,user4,user5,user6</code>
     <div class="presets">
-      <a href="2-streams.html">2 Streams</a>
-      <a href="3-streams.html">3 Streams</a>
-      <a href="4-streams.html">4 Streams</a>
-      <a href="6-streams.html">6 Streams</a>
-      <a href="8-streams.html">8 Streams</a>
-      <a href="10-streams.html">10 Streams</a>
-      <a href="12-streams.html">12 Streams</a>
-      <a href="16-streams.html">16 Streams</a>
-      <a href="24-streams.html">24 Streams</a>
+      <a href="2-streams.html">2 Streams (2&times;1)</a>
+      <a href="3-streams.html">3 Streams (3&times;1)</a>
+      <a href="4-streams.html">4 Streams (2&times;2)</a>
+      <a href="6-streams.html">6 Streams (3&times;2)</a>
+      <a href="8-streams.html">8 Streams (4&times;2)</a>
+      <a href="10-streams.html">10 Streams (5&times;2)</a>
+      <a href="12-streams.html">12 Streams (4&times;3)</a>
+      <a href="16-streams.html">16 Streams (4&times;4)</a>
+      <a href="24-streams.html">24 Streams (6&times;4)</a>
     </div>
   </div>
 
+  <!-- OBS Setup -->
+  <div class="card">
+    <h2>OBS Setup</h2>
+    <ol class="steps">
+      <li>Add a <strong>Browser Source</strong></li>
+      <li>Set dimensions to <strong>1920&times;1080</strong></li>
+      <li>Paste your overlay URL</li>
+      <li>The background is transparent — layer your frame/border overlay on top</li>
+    </ol>
+  </div>
+
+  <!-- Bandwidth -->
+  <div class="card">
+    <h2>Bandwidth</h2>
+    <p>Each stream uses roughly 3&ndash;6 Mbps of your download bandwidth. The streams load in your browser (or OBS), not on a server. More panels = more bandwidth.</p>
+    <table class="bw-table">
+      <tr><th>Streams</th><th>Est. Download</th></tr>
+      <tr><td>4</td><td>12&ndash;24 Mbps</td></tr>
+      <tr><td>6</td><td>18&ndash;36 Mbps</td></tr>
+      <tr><td>12</td><td>36&ndash;72 Mbps</td></tr>
+      <tr><td>24</td><td>72&ndash;144 Mbps</td></tr>
+    </table>
+  </div>
+
+  <!-- Support -->
   <div class="card tip-section">
     <h2>Support This Project</h2>
     <p>If this tool helps your restreams, consider leaving a tip!</p>
