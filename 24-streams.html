@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>24-Stream Race Overlay</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    background: transparent;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(6, 310px);
+    grid-template-rows: repeat(4, 174px);
+    gap: 8px;
+    justify-content: center;
+    align-content: center;
+    width: 1920px;
+    height: 1080px;
+  }
+  iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+  }
+</style>
+</head>
+<body>
+<div class="grid" id="grid"></div>
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const channelParam = params.get('channels');
+  const parent = params.get('parent') || 'thealchemist616.github.io';
+  const COUNT = 24;
+  const defaults = ['channel1','channel2','channel3','channel4','channel5','channel6','channel7','channel8','channel9','channel10','channel11','channel12','channel13','channel14','channel15','channel16','channel17','channel18','channel19','channel20','channel21','channel22','channel23','channel24'];
+  const channels = channelParam ? channelParam.split(',') : defaults;
+
+  const grid = document.getElementById('grid');
+  for (let i = 0; i < COUNT; i++) {
+    const ch = channels[i] || `channel${i + 1}`;
+    const iframe = document.createElement('iframe');
+    iframe.src = `https://player.twitch.tv/?channel=${ch}&parent=${parent}&muted=true&autoplay=true`;
+    iframe.allow = 'autoplay; encrypted-media';
+    iframe.allowFullscreen = true;
+    grid.appendChild(iframe);
+  }
+</script>
+</body>
+</html>
