@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi-Stream Race Overlay for OBS</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d0d1a;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+  }
+
+  .container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 24px;
+  }
+
+  h1 {
+    color: #00d4ff;
+    font-size: 28px;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    color: #888;
+    font-size: 16px;
+    margin-bottom: 32px;
+  }
+
+  .card {
+    background: #1a1a2e;
+    border: 1px solid #2a2a3e;
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  .card h2 {
+    color: #00d4ff;
+    font-size: 18px;
+    margin-bottom: 12px;
+  }
+  .card p {
+    color: #bbb;
+    font-size: 14px;
+    line-height: 1.6;
+    margin-bottom: 16px;
+  }
+
+  .btn {
+    display: inline-block;
+    background: #00d4ff;
+    color: #000;
+    font-weight: 700;
+    font-size: 14px;
+    padding: 10px 24px;
+    border-radius: 6px;
+    text-decoration: none;
+    transition: background 0.15s;
+  }
+  .btn:hover { background: #00b8dd; }
+
+  .features {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .feature {
+    background: #2a2a3e;
+    padding: 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #ccc;
+  }
+  .feature strong {
+    color: #00d4ff;
+  }
+
+  .presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .presets a {
+    background: #2a2a3e;
+    color: #ccc;
+    padding: 6px 14px;
+    border-radius: 4px;
+    font-size: 13px;
+    text-decoration: none;
+    border: 1px solid #3a3a4e;
+    transition: border-color 0.15s;
+  }
+  .presets a:hover {
+    border-color: #00d4ff;
+    color: #fff;
+  }
+
+  .tip-section {
+    text-align: center;
+    margin-top: 8px;
+  }
+  .tip-section h2 {
+    margin-bottom: 16px;
+  }
+
+  .footer {
+    text-align: center;
+    color: #555;
+    font-size: 12px;
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px solid #2a2a3e;
+  }
+  .footer a { color: #00d4ff; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>Multi-Stream Race Overlay</h1>
+  <p class="subtitle">Free browser-based Twitch multi-stream overlays for OBS. No installs needed.</p>
+
+  <div class="card">
+    <h2>Interactive Editor</h2>
+    <p>Full drag-and-drop overlay editor. Move, resize, zoom, and crop each stream panel while watching live. Export your layout as a URL and paste it into OBS.</p>
+    <div class="features">
+      <div class="feature"><strong>Drag & resize</strong> panels freely on a 1920x1080 canvas</div>
+      <div class="feature"><strong>Crop mode</strong> — zoom/pan each stream while it plays live</div>
+      <div class="feature"><strong>Preset layouts</strong> — 2 to 24 stream grids in one click</div>
+      <div class="feature"><strong>URL export</strong> — share layouts with a single link</div>
+    </div>
+    <a href="overlay.html" class="btn">Open Editor</a>
+  </div>
+
+  <div class="card">
+    <h2>Static Overlays</h2>
+    <p>Simple fixed-grid layouts. Add <code>?channels=user1,user2,...</code> to set channel names.</p>
+    <div class="presets">
+      <a href="2-streams.html">2 Streams</a>
+      <a href="3-streams.html">3 Streams</a>
+      <a href="4-streams.html">4 Streams</a>
+      <a href="6-streams.html">6 Streams</a>
+      <a href="8-streams.html">8 Streams</a>
+      <a href="10-streams.html">10 Streams</a>
+      <a href="12-streams.html">12 Streams</a>
+      <a href="16-streams.html">16 Streams</a>
+      <a href="24-streams.html">24 Streams</a>
+    </div>
+  </div>
+
+  <div class="card tip-section">
+    <h2>Support This Project</h2>
+    <p>If this tool helps your restreams, consider leaving a tip!</p>
+    <iframe id='kofiframe' src='https://ko-fi.com/thealchemicgamer/?hidefeed=true&widget=true&embed=true&preview=true' style='border:none;width:100%;padding:4px;background:#1a1a2e;' height='712' title='thealchemicgamer'></iframe>
+  </div>
+
+  <div class="footer">
+    Built by <a href="https://github.com/TheAlchemist616">TheAlchemist616</a> &nbsp;|&nbsp;
+    <a href="https://github.com/TheAlchemist616/TheAlchemist616.github.io">View on GitHub</a>
+  </div>
+</div>
+
+</body>
+</html>
