@@ -22,9 +22,55 @@
     overflow: hidden;
   }
 
-  /* Edit mode canvas outline */
+  /* Edit mode canvas — visible boundary + subtle grid */
   body.edit-mode #canvas {
-    outline: 2px dashed rgba(255,255,255,0.3);
+    outline: 3px solid #00d4ff;
+    background:
+      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
+      rgba(10, 10, 20, 0.95);
+    background-size: 120px 120px;
+  }
+
+  /* Canvas dimension label */
+  #canvas-label {
+    display: none;
+    position: absolute;
+    bottom: -28px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #00d4ff;
+    color: #000;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 12px;
+    border-radius: 0 0 4px 4px;
+    z-index: 999;
+    letter-spacing: 1px;
+  }
+  body.edit-mode #canvas-label { display: block; }
+
+  /* Corner markers */
+  #canvas::before, #canvas::after {
+    display: none;
+    position: absolute;
+    content: '';
+    width: 24px;
+    height: 24px;
+    border-color: #00d4ff;
+    border-style: solid;
+    z-index: 998;
+    pointer-events: none;
+  }
+  body.edit-mode #canvas::before,
+  body.edit-mode #canvas::after { display: block; }
+  #canvas::before {
+    top: 0; left: 0;
+    border-width: 3px 0 0 3px;
+  }
+  #canvas::after {
+    bottom: 0; right: 0;
+    border-width: 0 3px 3px 0;
   }
 
   /* Stream panel */
@@ -322,7 +368,9 @@
 </head>
 <body>
 
-<div id="canvas"></div>
+<div id="canvas">
+  <div id="canvas-label">1920 x 1080</div>
+</div>
 
 <div id="sidebar">
   <h2>Overlay Editor</h2>
