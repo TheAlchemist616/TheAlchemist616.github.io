@@ -4,6 +4,8 @@ Browser-based Twitch multi-stream overlays for race restreams. Add as an OBS Bro
 
 **Live at:** `thealchemist616.github.io`
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/thealchemicgamer)
+
 ## Quick Start
 
 1. Open `thealchemist616.github.io/overlay.html` in your browser
