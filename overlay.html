@@ -382,6 +382,22 @@
   </div>
 
   <div class="sidebar-section">
+    <h3>Resize All Streams</h3>
+    <div class="sidebar-row">
+      <label>W</label>
+      <input type="number" id="all-w" placeholder="width">
+      <label>H</label>
+      <input type="number" id="all-h" placeholder="height">
+    </div>
+    <div class="sidebar-row" style="gap:4px;">
+      <button class="btn btn-sm btn-primary" onclick="resizeAll()">Apply</button>
+      <button class="btn btn-sm" onclick="resizeAllLock169()">Apply & Lock 16:9</button>
+      <button class="btn btn-sm" onclick="redistributeGrid()">Re-grid</button>
+    </div>
+    <p style="font-size:11px; color:#666; margin-top:4px;">Re-grid auto-arranges all panels into a centered grid at the new size.</p>
+  </div>
+
+  <div class="sidebar-section">
     <h3>Streams</h3>
     <div id="panel-list"></div>
   </div>
@@ -921,6 +937,68 @@ function clampPan(p) {
 // ============================================================
 // SIDEBAR ACTIONS
 // ============================================================
+// ============================================================
+// RESIZE ALL
+// ============================================================
+function resizeAll() {
+  const w = parseInt(document.getElementById('all-w').value);
+  const h = parseInt(document.getElementById('all-h').value);
+  if (!w && !h) return;
+  panels.forEach(p => {
+    if (w) p.w = w;
+    if (h) p.h = h;
+    clampPan(p);
+  });
+  renderAll();
+  saveConfig();
+}
+
+function resizeAllLock169() {
+  const w = parseInt(document.getElementById('all-w').value);
+  const h = parseInt(document.getElementById('all-h').value);
+  if (!w && !h) return;
+  panels.forEach(p => {
+    if (w) { p.w = w; p.h = Math.round(w * 9 / 16); }
+    else if (h) { p.h = h; p.w = Math.round(h * 16 / 9); }
+    clampPan(p);
+  });
+  renderAll();
+  saveConfig();
+}
+
+function redistributeGrid() {
+  if (panels.length === 0) return;
+  const w = parseInt(document.getElementById('all-w').value) || panels[0].w;
+  const h = parseInt(document.getElementById('all-h').value) || panels[0].h;
+  const count = panels.length;
+
+  // Find best cols/rows that fit the canvas
+  let bestCols = 1;
+  for (let c = 1; c <= count; c++) {
+    const r = Math.ceil(count / c);
+    const totalW = c * w + (c + 1) * GAP;
+    const totalH = r * h + (r + 1) * GAP;
+    if (totalW <= CANVAS_W && totalH <= CANVAS_H) { bestCols = c; }
+  }
+  const rows = Math.ceil(count / bestCols);
+  const totalW = bestCols * w + (bestCols + 1) * GAP;
+  const totalH = rows * h + (rows + 1) * GAP;
+  const offsetX = Math.floor((CANVAS_W - totalW) / 2) + GAP;
+  const offsetY = Math.floor((CANVAS_H - totalH) / 2) + GAP;
+
+  panels.forEach((p, i) => {
+    const col = i % bestCols;
+    const row = Math.floor(i / bestCols);
+    p.x = offsetX + col * (w + GAP);
+    p.y = offsetY + row * (h + GAP);
+    p.w = w;
+    p.h = h;
+    clampPan(p);
+  });
+  renderAll();
+  saveConfig();
+}
+
 function updateSelectedChannel(val) {
   const p = panels.find(p => p.id === selectedId);
   if (!p) return;
