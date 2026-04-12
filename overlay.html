@@ -440,6 +440,12 @@
   </div>
 
   <div class="sidebar-section">
+    <h3>Playback</h3>
+    <button class="btn btn-primary" style="width:100%; margin-bottom:6px;" onclick="syncAllStreams()">Sync All Streams</button>
+    <p style="font-size:11px; color:#666;">Reloads all streams simultaneously so they start from the same live point.</p>
+  </div>
+
+  <div class="sidebar-section">
     <h3>Config</h3>
     <button class="btn" style="width:100%; margin-bottom:6px;" onclick="exportURL()">Export as URL</button>
     <button class="btn" style="width:100%; margin-bottom:6px;" onclick="copyConfig()">Copy Config JSON</button>
@@ -1158,6 +1164,25 @@ function loadConfig() {
   }
 
   renderAll();
+}
+
+function syncAllStreams() {
+  // Reload all iframes simultaneously to sync live streams
+  const iframes = [];
+  for (const [id, entry] of panelElements) {
+    const p = panels.find(p => p.id === id);
+    if (!p || !entry.iframe) continue;
+    iframes.push({ iframe: entry.iframe, channel: p.channel });
+  }
+  // Blank all iframes first
+  iframes.forEach(({ iframe }) => { iframe.src = 'about:blank'; });
+  // After a short delay, reload them all at once
+  setTimeout(() => {
+    iframes.forEach(({ iframe, channel }) => {
+      iframe.src = `https://player.twitch.tv/?channel=${encodeURIComponent(channel)}&parent=${PARENT}&muted=true&autoplay=true`;
+    });
+    showToast('Streams synced!');
+  }, 500);
 }
 
 function exportURL() {
