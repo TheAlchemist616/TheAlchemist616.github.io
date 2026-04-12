@@ -391,7 +391,8 @@
     </div>
     <div class="sidebar-row" style="gap:4px;">
       <button class="btn btn-sm btn-primary" onclick="resizeAll()">Apply</button>
-      <button class="btn btn-sm" onclick="resizeAllLock169()">Apply & Lock 16:9</button>
+      <button class="btn btn-sm" onclick="resizeAllLockRatio(16,9)">Lock 16:9</button>
+      <button class="btn btn-sm" onclick="resizeAllLockRatio(4,3)">Lock 4:3</button>
       <button class="btn btn-sm" onclick="redistributeGrid()">Re-grid</button>
     </div>
     <p style="font-size:11px; color:#666; margin-top:4px;">Re-grid auto-arranges all panels into a centered grid at the new size.</p>
@@ -427,7 +428,8 @@
     </div>
     <div class="sidebar-row" style="margin-top:4px;">
       <button class="btn btn-sm" onclick="resetSelectedZoomPan()">Reset Zoom/Pan</button>
-      <button class="btn btn-sm" onclick="lockAspect()">Lock 16:9</button>
+      <button class="btn btn-sm" onclick="lockAspect(16,9)">Lock 16:9</button>
+      <button class="btn btn-sm" onclick="lockAspect(4,3)">Lock 4:3</button>
       <button class="btn btn-sm btn-danger" onclick="removeSelected()">Delete</button>
     </div>
     <div class="sidebar-row" style="margin-top:4px;">
@@ -953,13 +955,13 @@ function resizeAll() {
   saveConfig();
 }
 
-function resizeAllLock169() {
+function resizeAllLockRatio(rw, rh) {
   const w = parseInt(document.getElementById('all-w').value);
   const h = parseInt(document.getElementById('all-h').value);
   if (!w && !h) return;
   panels.forEach(p => {
-    if (w) { p.w = w; p.h = Math.round(w * 9 / 16); }
-    else if (h) { p.h = h; p.w = Math.round(h * 16 / 9); }
+    if (w) { p.w = w; p.h = Math.round(w * rh / rw); }
+    else if (h) { p.h = h; p.w = Math.round(h * rw / rh); }
     clampPan(p);
   });
   renderAll();
@@ -1045,10 +1047,10 @@ function resetSelectedZoomPan() {
   saveConfig();
 }
 
-function lockAspect() {
+function lockAspect(rw, rh) {
   const p = panels.find(p => p.id === selectedId);
   if (!p) return;
-  p.h = Math.round(p.w * 9 / 16);
+  p.h = Math.round(p.w * rh / rw);
   clampPan(p);
   renderAll();
   saveConfig();
