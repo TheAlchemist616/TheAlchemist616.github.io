@@ -3,7 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <title>Multi-Stream Race Overlay</title>
-<script src="https://player.twitch.tv/js/embed/v1.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -88,8 +87,6 @@
   }
   .panel iframe {
     border: none;
-  }
-  .player-container {
     position: absolute;
     top: 0;
     left: 0;
@@ -591,33 +588,12 @@ function createPanelElement(p) {
   const wrapper = document.createElement('div');
   wrapper.className = 'stream-wrapper';
 
-  // Player container (zoom/pan applied here)
-  const playerContainer = document.createElement('div');
-  playerContainer.className = 'player-container';
-
-  // Twitch Player target div
-  const playerDiv = document.createElement('div');
-  playerDiv.id = 'twitch-' + p.id;
-  playerContainer.appendChild(playerDiv);
-  wrapper.appendChild(playerContainer);
-
-  // Create Twitch Player via API
-  let player = null;
-  try {
-    player = new Twitch.Player(playerDiv.id, {
-      channel: p.channel,
-      parent: [PARENT],
-      muted: true,
-      autoplay: true,
-      width: p.w,
-      height: p.h,
-    });
-  } catch (e) {
-    // Fallback if Twitch API not loaded (local file:// testing)
-    playerDiv.style.width = p.w + 'px';
-    playerDiv.style.height = p.h + 'px';
-    playerDiv.style.background = '#1a1a2e';
-  }
+  // Iframe
+  const iframe = document.createElement('iframe');
+  iframe.src = `https://player.twitch.tv/?channel=${encodeURIComponent(p.channel)}&parent=${PARENT}&muted=true&autoplay=true`;
+  iframe.allow = 'autoplay; encrypted-media';
+  iframe.allowFullscreen = true;
+  wrapper.appendChild(iframe);
 
   // Edit overlay (for move in layout mode)
   const overlay = document.createElement('div');
@@ -657,7 +633,7 @@ function createPanelElement(p) {
   div.appendChild(label);
   div.appendChild(badge);
 
-  return { el: div, player, playerContainer, channelLoaded: p.channel };
+  return { el: div, iframe, channelLoaded: p.channel };
 }
 
 function updateAllPanelDOM() {
@@ -677,30 +653,17 @@ function updateAllPanelDOM() {
     el.style.width = p.w + 'px';
     el.style.height = p.h + 'px';
 
-    // Player container zoom/pan
-    const pc = entry.playerContainer;
-    if (pc) {
-      pc.style.width = p.w + 'px';
-      pc.style.height = p.h + 'px';
-      pc.style.transform = `scale(${p.zoom})`;
-      pc.style.left = p.panX + 'px';
-      pc.style.top = p.panY + 'px';
-    }
+    // Iframe zoom/pan (no reload)
+    const iframe = entry.iframe;
+    iframe.style.width = p.w + 'px';
+    iframe.style.height = p.h + 'px';
+    iframe.style.transform = `scale(${p.zoom})`;
+    iframe.style.left = p.panX + 'px';
+    iframe.style.top = p.panY + 'px';
 
-    // Resize the Twitch player iframe
-    if (entry.player && entry.player.getIframe) {
-      const iframe = entry.player.getIframe();
-      if (iframe) {
-        iframe.width = p.w;
-        iframe.height = p.h;
-      }
-    }
-
-    // Switch channel via API if changed
+    // Only reload iframe if channel changed
     if (entry.channelLoaded !== p.channel) {
-      if (entry.player && entry.player.setChannel) {
-        entry.player.setChannel(p.channel);
-      }
+      iframe.src = `https://player.twitch.tv/?channel=${encodeURIComponent(p.channel)}&parent=${PARENT}&muted=true&autoplay=true`;
       entry.channelLoaded = p.channel;
     }
 
@@ -959,13 +922,13 @@ function updatePanelDOM(p) {
   el.style.width = p.w + 'px';
   el.style.height = p.h + 'px';
 
-  const entry = panelElements.get(p.id);
-  if (entry && entry.playerContainer) {
-    entry.playerContainer.style.width = p.w + 'px';
-    entry.playerContainer.style.height = p.h + 'px';
-    entry.playerContainer.style.transform = `scale(${p.zoom})`;
-    entry.playerContainer.style.left = p.panX + 'px';
-    entry.playerContainer.style.top = p.panY + 'px';
+  const iframe = el.querySelector('iframe');
+  if (iframe) {
+    iframe.style.width = p.w + 'px';
+    iframe.style.height = p.h + 'px';
+    iframe.style.transform = `scale(${p.zoom})`;
+    iframe.style.left = p.panX + 'px';
+    iframe.style.top = p.panY + 'px';
   }
 
   const badge = el.querySelector('.zoom-badge');
@@ -1204,21 +1167,22 @@ function loadConfig() {
 }
 
 function syncAllStreams() {
-  // Pause all players, then play all simultaneously
-  const players = [];
+  // Reload all iframes simultaneously to sync live streams
+  const iframes = [];
   for (const [id, entry] of panelElements) {
-    if (entry.player && entry.player.pause) players.push(entry.player);
+    const p = panels.find(p => p.id === id);
+    if (!p || !entry.iframe) continue;
+    iframes.push({ iframe: entry.iframe, channel: p.channel });
   }
-  if (players.length === 0) { showToast('No active players to sync'); return; }
-
-  // Pause all
-  players.forEach(p => p.pause());
-
-  // Short delay then play all at once
+  // Blank all iframes first
+  iframes.forEach(({ iframe }) => { iframe.src = 'about:blank'; });
+  // After a short delay, reload them all at once
   setTimeout(() => {
-    players.forEach(p => p.play());
+    iframes.forEach(({ iframe, channel }) => {
+      iframe.src = `https://player.twitch.tv/?channel=${encodeURIComponent(channel)}&parent=${PARENT}&muted=true&autoplay=true`;
+    });
     showToast('Streams synced!');
-  }, 300);
+  }, 500);
 }
 
 function exportURL() {
