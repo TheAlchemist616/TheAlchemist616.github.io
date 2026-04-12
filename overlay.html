@@ -428,6 +428,7 @@
     </div>
     <div class="sidebar-row" style="margin-top:4px;">
       <button class="btn btn-sm" onclick="resetSelectedZoomPan()">Reset Zoom/Pan</button>
+      <button class="btn btn-sm" onclick="copyZoomPanToAll()">Copy Zoom/Pan to All</button>
       <button class="btn btn-sm" onclick="lockAspect(16,9)">Lock 16:9</button>
       <button class="btn btn-sm" onclick="lockAspect(4,3)">Lock 4:3</button>
       <button class="btn btn-sm btn-danger" onclick="removeSelected()">Delete</button>
@@ -1045,6 +1046,21 @@ function resetSelectedZoomPan() {
   p.zoom = 1; p.panX = 0; p.panY = 0;
   renderAll();
   saveConfig();
+}
+
+function copyZoomPanToAll() {
+  const src = panels.find(p => p.id === selectedId);
+  if (!src) return;
+  panels.forEach(p => {
+    if (p.id === src.id) return;
+    p.zoom = src.zoom;
+    p.panX = src.panX;
+    p.panY = src.panY;
+    clampPan(p);
+  });
+  renderAll();
+  saveConfig();
+  showToast('Zoom/pan copied to all streams');
 }
 
 function lockAspect(rw, rh) {
