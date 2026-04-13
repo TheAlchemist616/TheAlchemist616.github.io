@@ -50,6 +50,20 @@
   }
   body.edit-mode #canvas-label { display: block; }
 
+  /* Frame overlay image */
+  #frame-image {
+    display: none;
+    position: absolute;
+    top: 0; left: 0;
+    width: 1920px;
+    height: 1080px;
+    z-index: 500;
+    pointer-events: none;
+    opacity: 0.5;
+    object-fit: contain;
+  }
+  body.edit-mode #frame-image.loaded { display: block; }
+
   /* Corner markers */
   #canvas::before, #canvas::after {
     display: none;
@@ -369,11 +383,23 @@
 <body>
 
 <div id="canvas">
+  <img id="frame-image" src="" alt="">
   <div id="canvas-label">1920 x 1080</div>
 </div>
 
 <div id="sidebar">
   <h2>Overlay Editor</h2>
+
+  <div class="sidebar-section">
+    <h3>Frame Overlay</h3>
+    <input type="file" id="frame-upload" accept="image/*" style="display:none;" onchange="loadFrameImage(this)">
+    <button class="btn" style="width:100%; margin-bottom:6px;" onclick="document.getElementById('frame-upload').click()">Upload Frame Image</button>
+    <div class="sidebar-row" id="frame-controls" style="display:none;">
+      <button class="btn btn-sm" onclick="toggleFrameOpacity()">Opacity: <span id="frame-opacity-label">50%</span></button>
+      <button class="btn btn-sm btn-danger" onclick="removeFrameImage()">Remove</button>
+    </div>
+    <p style="font-size:11px; color:#666;">Upload your OBS frame PNG to align streams with the cutouts. Only visible in edit mode.</p>
+  </div>
 
   <div class="sidebar-section">
     <h3>Presets</h3>
@@ -1160,6 +1186,41 @@ function loadConfig() {
   renderAll();
 }
 
+
+// ============================================================
+// FRAME OVERLAY IMAGE
+// ============================================================
+let frameOpacity = 0.5;
+
+function loadFrameImage(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const img = document.getElementById('frame-image');
+    img.src = e.target.result;
+    img.classList.add('loaded');
+    document.getElementById('frame-controls').style.display = 'flex';
+    showToast('Frame loaded — align your streams underneath');
+  };
+  reader.readAsDataURL(file);
+}
+
+function toggleFrameOpacity() {
+  const steps = [0.25, 0.5, 0.75, 1.0];
+  const idx = steps.indexOf(frameOpacity);
+  frameOpacity = steps[(idx + 1) % steps.length];
+  document.getElementById('frame-image').style.opacity = frameOpacity;
+  document.getElementById('frame-opacity-label').textContent = Math.round(frameOpacity * 100) + '%';
+}
+
+function removeFrameImage() {
+  const img = document.getElementById('frame-image');
+  img.src = '';
+  img.classList.remove('loaded');
+  document.getElementById('frame-controls').style.display = 'none';
+  document.getElementById('frame-upload').value = '';
+}
 
 function exportURL() {
   const config = getConfig();
