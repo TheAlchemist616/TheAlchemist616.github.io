@@ -799,7 +799,7 @@ function renderPanelList() {
     inp.onclick = e => e.stopPropagation();
     inp.oninput = () => {
       p.channel = inp.value;
-      renderCanvas();
+      updateAllPanelDOM();
       saveConfig();
     };
 
@@ -1147,7 +1147,7 @@ function updateSelectedChannel(val) {
   const p = panels.find(p => p.id === selectedId);
   if (!p) return;
   p.channel = val;
-  renderCanvas();
+  updateAllPanelDOM();
   renderPanelList();
   saveConfig();
 }
@@ -1157,7 +1157,7 @@ function updateSelectedPos() {
   if (!p) return;
   p.x = parseInt(document.getElementById('det-x').value) || 0;
   p.y = parseInt(document.getElementById('det-y').value) || 0;
-  renderCanvas();
+  updateAllPanelDOM();
   saveConfig();
 }
 
@@ -1167,7 +1167,7 @@ function updateSelectedSize() {
   p.w = parseInt(document.getElementById('det-w').value) || 100;
   p.h = parseInt(document.getElementById('det-h').value) || 56;
   clampPan(p);
-  renderCanvas();
+  updateAllPanelDOM();
   saveConfig();
 }
 
@@ -1177,7 +1177,7 @@ function updateSelectedZoom(val) {
   p.zoom = parseFloat(val);
   clampPan(p);
   document.getElementById('det-zoom-val').textContent = p.zoom.toFixed(1) + 'x';
-  renderCanvas();
+  updateAllPanelDOM();
   saveConfig();
 }
 
