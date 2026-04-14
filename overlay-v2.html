@@ -259,14 +259,16 @@
     position: fixed;
     top: 0; right: 0;
     width: 300px;
-    height: 100vh;
+    max-height: 100vh;
     background: #1a1a2e;
     color: #e0e0e0;
     z-index: 1000;
     overflow-y: auto;
-    border-left: 2px solid #00d4ff;
+    border: 2px solid #00d4ff;
+    border-radius: 6px;
     padding: 12px;
     font-size: 13px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
   }
   body.edit-mode #sidebar { display: block; }
 
@@ -274,6 +276,9 @@
     color: #00d4ff;
     font-size: 16px;
     margin-bottom: 12px;
+    cursor: grab;
+    user-select: none;
+    padding: 4px 0;
     padding-bottom: 8px;
     border-bottom: 1px solid #333;
   }
@@ -1414,6 +1419,38 @@ document.getElementById('canvas').addEventListener('mousedown', e => {
 // ============================================================
 // TOAST
 // ============================================================
+// ============================================================
+// DRAGGABLE SIDEBAR
+// ============================================================
+(function() {
+  let dragging = false, offsetX = 0, offsetY = 0;
+  const sidebar = document.getElementById('sidebar');
+  const handle = sidebar.querySelector('h2');
+
+  handle.addEventListener('mousedown', e => {
+    if (e.target.tagName === 'INPUT') return;
+    dragging = true;
+    offsetX = e.clientX - sidebar.getBoundingClientRect().left;
+    offsetY = e.clientY - sidebar.getBoundingClientRect().top;
+    handle.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    sidebar.style.left = (e.clientX - offsetX) + 'px';
+    sidebar.style.top = (e.clientY - offsetY) + 'px';
+    sidebar.style.right = 'auto';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (dragging) {
+      dragging = false;
+      handle.style.cursor = 'grab';
+    }
+  });
+})();
+
 function showToast(msg) {
   const toast = document.getElementById('toast');
   toast.textContent = msg;
