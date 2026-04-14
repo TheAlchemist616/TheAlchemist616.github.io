@@ -23,7 +23,7 @@
     overflow: hidden;
   }
 
-  /* Edit mode canvas — visible boundary + subtle grid */
+  /* Edit mode canvas — visible boundary + subtle grid, scaled to fit beside sidebar */
   body.edit-mode #canvas {
     outline: 3px solid #00d4ff;
     background:
@@ -31,6 +31,8 @@
       linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
       rgba(10, 10, 20, 0.95);
     background-size: 120px 120px;
+    transform-origin: top left;
+    transform: scale(calc((100vw - 300px) / 1920));
   }
 
   /* Canvas dimension label */
