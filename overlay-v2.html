@@ -63,7 +63,7 @@
     height: 1080px;
     z-index: 500;
     pointer-events: none;
-    opacity: 0.5;
+    opacity: 1;
     object-fit: contain;
   }
   #frame-image.loaded { display: block; }
@@ -568,6 +568,7 @@
     <div class="sidebar-row" style="margin-top:4px;">
       <button class="btn btn-sm" onclick="resetSelectedZoomPan()">Reset Zoom/Pan</button>
       <button class="btn btn-sm" onclick="copyZoomPanToAll()">Copy Zoom/Pan to All</button>
+      <button class="btn btn-sm" onclick="copyAllToAll()">Copy All to All</button>
       <button class="btn btn-sm" onclick="lockAspect(16,9)">Lock 16:9</button>
       <button class="btn btn-sm" onclick="lockAspect(4,3)">Lock 4:3</button>
       <button class="btn btn-sm btn-danger" onclick="removeSelected()">Delete</button>
@@ -1325,16 +1326,38 @@ function resetSelectedZoomPan() {
 function copyZoomPanToAll() {
   const src = panels.find(p => p.id === selectedId);
   if (!src) return;
+  // Convert pan to percentage of panel size so it scales to different sizes
+  const panXPct = src.w ? src.panX / src.w : 0;
+  const panYPct = src.h ? src.panY / src.h : 0;
   panels.forEach(p => {
     if (p.id === src.id) return;
     p.zoom = src.zoom;
-    p.panX = src.panX;
-    p.panY = src.panY;
+    p.panX = Math.round(panXPct * p.w);
+    p.panY = Math.round(panYPct * p.h);
     clampPan(p);
   });
   renderAll();
   saveConfig();
   showToast('Zoom/pan copied to all streams');
+}
+
+function copyAllToAll() {
+  const src = panels.find(p => p.id === selectedId);
+  if (!src) return;
+  const panXPct = src.w ? src.panX / src.w : 0;
+  const panYPct = src.h ? src.panY / src.h : 0;
+  panels.forEach(p => {
+    if (p.id === src.id) return;
+    p.w = src.w;
+    p.h = src.h;
+    p.zoom = src.zoom;
+    p.panX = Math.round(panXPct * p.w);
+    p.panY = Math.round(panYPct * p.h);
+    clampPan(p);
+  });
+  renderAll();
+  saveConfig();
+  showToast('Size/zoom/pan copied to all streams');
 }
 
 function lockAspect(rw, rh) {
