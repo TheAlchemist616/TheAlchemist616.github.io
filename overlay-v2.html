@@ -626,11 +626,36 @@ function syncCanvasDOM() {
   }
 
   // Create new panels / reorder
+  const newEntries = [];
   panels.forEach(p => {
     if (!panelElements.has(p.id)) {
-      const el = createPanelElement(p);
-      canvas.appendChild(el.el);
-      panelElements.set(p.id, el);
+      const entry = createPanelElement(p);
+      canvas.appendChild(entry.el);
+      panelElements.set(p.id, entry);
+      newEntries.push({ entry, panel: p });
+    }
+  });
+
+  // Init Twitch Players AFTER elements are in the DOM
+  newEntries.forEach(({ entry, panel }) => {
+    try {
+      const player = new Twitch.Player('tp-' + panel.id, {
+        channel: panel.channel,
+        parent: [PARENT],
+        muted: true,
+        autoplay: true,
+        width: panel.w,
+        height: panel.h,
+      });
+      entry.player = player;
+    } catch (e) {
+      // Fallback for local file:// testing
+      const target = document.getElementById('tp-' + panel.id);
+      if (target) {
+        target.style.width = panel.w + 'px';
+        target.style.height = panel.h + 'px';
+        target.style.background = '#1a1a2e';
+      }
     }
   });
 }
@@ -651,24 +676,6 @@ function createPanelElement(p) {
   playerTarget.id = 'tp-' + p.id;
   playerContainer.appendChild(playerTarget);
   wrapper.appendChild(playerContainer);
-
-  // Create Twitch Player via API
-  let player = null;
-  try {
-    player = new Twitch.Player(playerTarget.id, {
-      channel: p.channel,
-      parent: [PARENT],
-      muted: true,
-      autoplay: true,
-      width: p.w,
-      height: p.h,
-    });
-  } catch (e) {
-    // Fallback for local file:// testing
-    playerTarget.style.width = p.w + 'px';
-    playerTarget.style.height = p.h + 'px';
-    playerTarget.style.background = '#1a1a2e';
-  }
 
   // Edit overlay (for move in layout mode)
   const overlay = document.createElement('div');
@@ -719,7 +726,7 @@ function createPanelElement(p) {
   div.appendChild(label);
   div.appendChild(badge);
 
-  return { el: div, player, playerContainer, audioBtn, channelLoaded: p.channel };
+  return { el: div, player: null, playerContainer, audioBtn, channelLoaded: p.channel };
 }
 
 function updateAllPanelDOM() {
