@@ -562,7 +562,7 @@
     </div>
     <div class="sidebar-row">
       <label>Zoom</label>
-      <input type="range" id="det-zoom" min="1" max="4" step="0.05" value="1" oninput="updateSelectedZoom(this.value)">
+      <input type="range" id="det-zoom" min="1" max="8" step="0.05" value="1" oninput="updateSelectedZoom(this.value)">
       <span id="det-zoom-val" style="min-width:35px;text-align:right;">1.0x</span>
     </div>
     <div class="sidebar-row" style="margin-top:4px;">
@@ -1104,7 +1104,7 @@ function onPanelWheel(e, id) {
   if (!p) return;
 
   const delta = e.deltaY > 0 ? -0.1 : 0.1;
-  p.zoom = Math.max(1, Math.min(4, p.zoom + delta));
+  p.zoom = Math.max(1, Math.min(8, p.zoom + delta));
 
   // Clamp pan when zooming out
   clampPan(p);
@@ -1195,10 +1195,11 @@ function updatePanelDOM(p) {
 
 function clampPan(p) {
   if (p.zoom <= 1) { p.panX = 0; p.panY = 0; return; }
-  const maxPanX = p.w * (p.zoom - 1);
-  const maxPanY = p.h * (p.zoom - 1);
-  p.panX = Math.max(-maxPanX, Math.min(0, p.panX));
-  p.panY = Math.max(-maxPanY, Math.min(0, p.panY));
+  // Allow full pan range so you can reach any part of the stream
+  const maxPanX = p.w * p.zoom;
+  const maxPanY = p.h * p.zoom;
+  p.panX = Math.max(-maxPanX, Math.min(maxPanX, p.panX));
+  p.panY = Math.max(-maxPanY, Math.min(maxPanY, p.panY));
 }
 
 // ============================================================
