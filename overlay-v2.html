@@ -202,6 +202,31 @@
     color: #00d4ff;
   }
 
+  /* Race timer */
+  #race-timer {
+    display: none;
+    position: absolute;
+    background: rgba(0, 0, 0, 0.85);
+    color: #00d4ff;
+    font-family: 'Courier New', monospace;
+    font-size: 48px;
+    font-weight: 700;
+    padding: 8px 20px;
+    border-radius: 6px;
+    z-index: 30;
+    pointer-events: none;
+    letter-spacing: 2px;
+    text-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+  }
+  #race-timer.visible { display: block; pointer-events: auto; cursor: move; }
+  body.edit-mode #race-timer.visible {
+    border: 2px solid #00d4ff;
+  }
+  #race-timer .timer-small {
+    font-size: 32px;
+    opacity: 0.6;
+  }
+
   /* Resize handles */
   .resize-handle {
     display: none;
@@ -426,6 +451,7 @@
 
 <div id="canvas">
   <img id="frame-image" src="" alt="">
+  <div id="race-timer"></div>
   <div id="canvas-label">1920 x 1080</div>
 </div>
 
@@ -448,6 +474,18 @@
     <div class="preset-grid" id="preset-buttons"></div>
     <button class="btn btn-primary" style="width:100%; margin-top:6px;" onclick="addPanel()">+ Add Stream</button>
     <button class="btn" style="width:100%; margin-top:4px;" onclick="addURLPanel()">+ Add URL Panel</button>
+  </div>
+
+  <div class="sidebar-section">
+    <h3>Racetime.gg Timer</h3>
+    <div class="sidebar-row">
+      <input type="text" id="racetime-url" placeholder="e.g. alttp/dazzling-dedede-1908">
+    </div>
+    <div class="sidebar-row" style="gap:4px;">
+      <button class="btn btn-sm btn-primary" onclick="connectRaceTimer()">Connect</button>
+      <button class="btn btn-sm btn-danger" onclick="disconnectRaceTimer()">Remove</button>
+    </div>
+    <div id="racetime-status" style="font-size:11px; color:#666; margin-top:4px;">Not connected</div>
   </div>
 
   <div class="sidebar-section">
@@ -1343,7 +1381,12 @@ function getConfig() {
       zoom: Math.round(p.zoom * 100) / 100,
       panX: Math.round(p.panX),
       panY: Math.round(p.panY),
-    }))
+    })),
+    timer: {
+      room: raceTimerState.room || '',
+      x: Math.round(raceTimerState.x),
+      y: Math.round(raceTimerState.y),
+    }
   };
 }
 
@@ -1389,6 +1432,14 @@ function loadConfig() {
     // Default: 6-stream 3x2 layout
     applyPreset(3, 2);
     return; // applyPreset calls renderAll
+  }
+
+  // Restore timer if saved
+  if (config.timer && config.timer.room) {
+    raceTimerState.x = config.timer.x || 760;
+    raceTimerState.y = config.timer.y || 520;
+    document.getElementById('racetime-url').value = config.timer.room;
+    connectRaceTimer();
   }
 
   renderAll();
@@ -1526,6 +1577,140 @@ document.getElementById('canvas').addEventListener('mousedown', e => {
     if (dragging) {
       dragging = false;
       handle.style.cursor = 'grab';
+    }
+  });
+})();
+
+// ============================================================
+// RACETIME.GG TIMER
+// ============================================================
+let raceTimerState = {
+  active: false,
+  startedAt: null,
+  endedAt: null,
+  interval: null,
+  room: '',
+  x: 760,
+  y: 520,
+};
+
+function connectRaceTimer() {
+  const input = document.getElementById('racetime-url').value.trim();
+  if (!input) return;
+
+  // Accept full URL or just the slug (alttp/dazzling-dedede-1908)
+  let room = input;
+  room = room.replace(/^https?:\/\/(www\.)?racetime\.gg\//, '');
+  room = room.replace(/\/$/, '');
+  room = room.replace(/\/data$/, '');
+
+  const statusEl = document.getElementById('racetime-status');
+  statusEl.textContent = 'Connecting...';
+  statusEl.style.color = '#ff0';
+
+  fetch(`https://racetime.gg/${room}/data`)
+    .then(r => {
+      if (!r.ok) throw new Error('Race not found');
+      return r.json();
+    })
+    .then(data => {
+      raceTimerState.room = room;
+      raceTimerState.startedAt = data.started_at ? new Date(data.started_at) : null;
+      raceTimerState.endedAt = data.ended_at ? new Date(data.ended_at) : null;
+      raceTimerState.active = true;
+
+      // Show timer
+      const timerEl = document.getElementById('race-timer');
+      timerEl.classList.add('visible');
+      timerEl.style.left = raceTimerState.x + 'px';
+      timerEl.style.top = raceTimerState.y + 'px';
+
+      // Start ticking
+      if (raceTimerState.interval) clearInterval(raceTimerState.interval);
+      raceTimerState.interval = setInterval(updateRaceTimer, 100);
+      updateRaceTimer();
+
+      statusEl.textContent = 'Connected: ' + (data.status?.value || 'unknown');
+      statusEl.style.color = '#0f0';
+
+      // Also pull entrant names into stream panels if they have twitch
+      if (data.entrants) {
+        const twitchNames = data.entrants
+          .filter(e => e.user && e.user.twitch_name)
+          .map(e => e.user.twitch_name);
+        if (twitchNames.length > 0) {
+          statusEl.textContent += ' | Racers: ' + twitchNames.join(', ');
+        }
+      }
+
+      saveConfig();
+    })
+    .catch(e => {
+      statusEl.textContent = 'Error: ' + e.message;
+      statusEl.style.color = '#f44';
+    });
+}
+
+function updateRaceTimer() {
+  const timerEl = document.getElementById('race-timer');
+  if (!raceTimerState.active || !raceTimerState.startedAt) {
+    timerEl.innerHTML = '0:00:00<span class="timer-small">.0</span>';
+    return;
+  }
+
+  const end = raceTimerState.endedAt || new Date();
+  const elapsed = Math.max(0, end.getTime() - raceTimerState.startedAt.getTime());
+
+  const ms = Math.floor((elapsed % 1000) / 100);
+  const totalSec = Math.floor(elapsed / 1000);
+  const sec = totalSec % 60;
+  const min = Math.floor(totalSec / 60) % 60;
+  const hr = Math.floor(totalSec / 3600);
+
+  const pad = n => n.toString().padStart(2, '0');
+  timerEl.innerHTML = `${hr}:${pad(min)}:${pad(sec)}<span class="timer-small">.${ms}</span>`;
+}
+
+function disconnectRaceTimer() {
+  raceTimerState.active = false;
+  raceTimerState.startedAt = null;
+  raceTimerState.endedAt = null;
+  raceTimerState.room = '';
+  if (raceTimerState.interval) {
+    clearInterval(raceTimerState.interval);
+    raceTimerState.interval = null;
+  }
+  document.getElementById('race-timer').classList.remove('visible');
+  document.getElementById('racetime-status').textContent = 'Not connected';
+  document.getElementById('racetime-status').style.color = '#666';
+  saveConfig();
+}
+
+// Make timer draggable
+(function() {
+  let dragging = false, offsetX = 0, offsetY = 0;
+  const timerEl = document.getElementById('race-timer');
+
+  timerEl.addEventListener('mousedown', e => {
+    dragging = true;
+    offsetX = e.clientX - timerEl.getBoundingClientRect().left;
+    offsetY = e.clientY - timerEl.getBoundingClientRect().top;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    raceTimerState.x = e.clientX - offsetX;
+    raceTimerState.y = e.clientY - offsetY;
+    timerEl.style.left = raceTimerState.x + 'px';
+    timerEl.style.top = raceTimerState.y + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (dragging) {
+      dragging = false;
+      saveConfig();
     }
   });
 })();
