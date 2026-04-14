@@ -447,6 +447,7 @@
     <h3>Presets</h3>
     <div class="preset-grid" id="preset-buttons"></div>
     <button class="btn btn-primary" style="width:100%; margin-top:6px;" onclick="addPanel()">+ Add Stream</button>
+    <button class="btn" style="width:100%; margin-top:4px;" onclick="addURLPanel()">+ Add URL Panel</button>
   </div>
 
   <div class="sidebar-section">
@@ -472,10 +473,14 @@
   </div>
 
   <div id="panel-detail" class="sidebar-section">
-    <h3>Selected Stream</h3>
-    <div class="sidebar-row">
+    <h3 id="det-title">Selected Stream</h3>
+    <div class="sidebar-row" id="det-channel-row">
       <label>Channel</label>
       <input type="text" id="det-channel" placeholder="twitch_username" oninput="updateSelectedChannel(this.value)">
+    </div>
+    <div class="sidebar-row" id="det-url-row" style="display:none;">
+      <label>URL</label>
+      <input type="text" id="det-url" placeholder="https://..." oninput="updateSelectedURL(this.value)">
     </div>
     <div class="sidebar-row">
       <label>X</label>
@@ -643,25 +648,38 @@ function syncCanvasDOM() {
     }
   });
 
-  // Init Twitch Players AFTER elements are in the DOM
+  // Init players AFTER elements are in the DOM
   newEntries.forEach(({ entry, panel }) => {
-    try {
-      const player = new Twitch.Player('tp-' + panel.id, {
-        channel: panel.channel,
-        parent: [PARENT],
-        muted: true,
-        autoplay: true,
-        width: panel.w,
-        height: panel.h,
-      });
-      entry.player = player;
-    } catch (e) {
-      // Fallback for local file:// testing
+    if (panel.type === 'url') {
+      // URL panel — raw iframe
+      const iframe = document.createElement('iframe');
+      iframe.src = panel.url || '';
+      iframe.style.width = panel.w + 'px';
+      iframe.style.height = panel.h + 'px';
+      iframe.style.border = 'none';
+      iframe.allow = 'autoplay; encrypted-media';
       const target = document.getElementById('tp-' + panel.id);
-      if (target) {
-        target.style.width = panel.w + 'px';
-        target.style.height = panel.h + 'px';
-        target.style.background = '#1a1a2e';
+      if (target) target.appendChild(iframe);
+      entry.urlIframe = iframe;
+    } else {
+      // Stream panel — Twitch Player
+      try {
+        const player = new Twitch.Player('tp-' + panel.id, {
+          channel: panel.channel,
+          parent: [PARENT],
+          muted: true,
+          autoplay: true,
+          width: panel.w,
+          height: panel.h,
+        });
+        entry.player = player;
+      } catch (e) {
+        const target = document.getElementById('tp-' + panel.id);
+        if (target) {
+          target.style.width = panel.w + 'px';
+          target.style.height = panel.h + 'px';
+          target.style.background = '#1a1a2e';
+        }
       }
     }
   });
@@ -763,7 +781,16 @@ function updateAllPanelDOM() {
       pc.style.top = p.panY + 'px';
     }
 
-    // Resize the player iframe if it exists
+    // URL panel — resize iframe and update URL
+    if (entry.urlIframe) {
+      entry.urlIframe.style.width = p.w + 'px';
+      entry.urlIframe.style.height = p.h + 'px';
+      if (p.url && entry.urlIframe.src !== p.url) {
+        entry.urlIframe.src = p.url;
+      }
+    }
+
+    // Stream panel — resize the player iframe if it exists
     if (entry.player && entry.player.getIframe) {
       const iframe = entry.player.getIframe();
       if (iframe) {
@@ -773,16 +800,22 @@ function updateAllPanelDOM() {
     }
 
     // Switch channel via API (no reload)
-    if (entry.channelLoaded !== p.channel) {
+    if (entry.channelLoaded !== p.channel && p.type !== 'url') {
       if (entry.player && entry.player.setChannel) {
         entry.player.setChannel(p.channel);
       }
       entry.channelLoaded = p.channel;
     }
 
+    // Hide audio button on URL panels
+    if (entry.audioBtn) {
+      entry.audioBtn.style.display = (p.type === 'url') ? 'none' : '';
+    }
+
     // Label
     const label = el.querySelector('.panel-label');
-    if (label) label.textContent = p.channel + (p.id === cropModeId ? ' [CROP]' : '');
+    const labelText = p.type === 'url' ? ('URL: ' + (p.url || '').substring(0, 30)) : p.channel;
+    if (label) label.textContent = labelText + (p.id === cropModeId ? ' [CROP]' : '');
 
     // Zoom badge
     const badge = el.querySelector('.zoom-badge');
@@ -808,11 +841,12 @@ function renderPanelList() {
 
     const inp = document.createElement('input');
     inp.type = 'text';
-    inp.value = p.channel;
-    inp.placeholder = 'channel_name';
+    inp.value = p.type === 'url' ? (p.url || '') : p.channel;
+    inp.placeholder = p.type === 'url' ? 'https://...' : 'channel_name';
     inp.onclick = e => e.stopPropagation();
     inp.oninput = () => {
-      p.channel = inp.value;
+      if (p.type === 'url') { p.url = inp.value; }
+      else { p.channel = inp.value; }
       updateAllPanelDOM();
       saveConfig();
     };
@@ -833,7 +867,16 @@ function renderPanelDetail() {
   }
   detail.classList.add('visible');
 
-  document.getElementById('det-channel').value = p.channel;
+  const isURL = p.type === 'url';
+  document.getElementById('det-title').textContent = isURL ? 'Selected URL Panel' : 'Selected Stream';
+  document.getElementById('det-channel-row').style.display = isURL ? 'none' : '';
+  document.getElementById('det-url-row').style.display = isURL ? '' : 'none';
+
+  if (isURL) {
+    document.getElementById('det-url').value = p.url || '';
+  } else {
+    document.getElementById('det-channel').value = p.channel;
+  }
   document.getElementById('det-x').value = Math.round(p.x);
   document.getElementById('det-y').value = Math.round(p.y);
   document.getElementById('det-w').value = Math.round(p.w);
@@ -1157,6 +1200,15 @@ function redistributeGrid() {
   saveConfig();
 }
 
+function updateSelectedURL(val) {
+  const p = panels.find(p => p.id === selectedId);
+  if (!p) return;
+  p.url = val;
+  updateAllPanelDOM();
+  renderPanelList();
+  saveConfig();
+}
+
 function updateSelectedChannel(val) {
   const p = panels.find(p => p.id === selectedId);
   if (!p) return;
@@ -1231,11 +1283,34 @@ function addPanel() {
   const id = 'p' + Date.now();
   panels.push({
     id,
+    type: 'stream',
     channel: `channel${panels.length + 1}`,
     x: 100 + panels.length * 20,
     y: 100 + panels.length * 20,
     w: 400,
     h: 225,
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+  });
+  selectedId = id;
+  renderAll();
+  saveConfig();
+}
+
+function addURLPanel() {
+  const url = prompt('Enter URL (e.g. racetime.gg timer, chat widget):');
+  if (!url) return;
+  const id = 'u' + Date.now();
+  panels.push({
+    id,
+    type: 'url',
+    url: url,
+    channel: '',
+    x: 100 + panels.length * 20,
+    y: 100 + panels.length * 20,
+    w: 400,
+    h: 200,
     zoom: 1,
     panX: 0,
     panY: 0,
@@ -1258,7 +1333,9 @@ function removeSelected() {
 function getConfig() {
   return {
     panels: panels.map(p => ({
+      type: p.type || 'stream',
       channel: p.channel,
+      url: p.url || '',
       x: Math.round(p.x),
       y: Math.round(p.y),
       w: Math.round(p.w),
@@ -1296,8 +1373,10 @@ function loadConfig() {
 
   if (config && config.panels && config.panels.length > 0) {
     panels = config.panels.map((p, i) => ({
-      id: 'p' + Date.now() + '_' + i,
+      id: (p.type === 'url' ? 'u' : 'p') + Date.now() + '_' + i,
+      type: p.type || 'stream',
       channel: p.channel || `channel${i + 1}`,
+      url: p.url || '',
       x: p.x || 0,
       y: p.y || 0,
       w: p.w || 400,
