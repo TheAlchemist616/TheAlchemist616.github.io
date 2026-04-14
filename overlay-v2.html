@@ -1,0 +1,1401 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Multi-Stream Race Overlay</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    user-select: none;
+  }
+
+  /* Canvas */
+  #canvas {
+    position: relative;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+  }
+
+  /* Edit mode canvas — visible boundary + subtle grid */
+  body.edit-mode #canvas {
+    outline: 3px solid #00d4ff;
+    background:
+      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
+      rgba(10, 10, 20, 0.95);
+    background-size: 120px 120px;
+  }
+
+  /* Canvas dimension label */
+  #canvas-label {
+    display: none;
+    position: absolute;
+    bottom: -28px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #00d4ff;
+    color: #000;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 12px;
+    border-radius: 0 0 4px 4px;
+    z-index: 999;
+    letter-spacing: 1px;
+  }
+  body.edit-mode #canvas-label { display: block; }
+
+  /* Frame overlay image */
+  #frame-image {
+    display: none;
+    position: absolute;
+    top: 0; left: 0;
+    width: 1920px;
+    height: 1080px;
+    z-index: 500;
+    pointer-events: none;
+    opacity: 0.5;
+    object-fit: contain;
+  }
+  body.edit-mode #frame-image.loaded { display: block; }
+
+  /* Corner markers */
+  #canvas::before, #canvas::after {
+    display: none;
+    position: absolute;
+    content: '';
+    width: 24px;
+    height: 24px;
+    border-color: #00d4ff;
+    border-style: solid;
+    z-index: 998;
+    pointer-events: none;
+  }
+  body.edit-mode #canvas::before,
+  body.edit-mode #canvas::after { display: block; }
+  #canvas::before {
+    top: 0; left: 0;
+    border-width: 3px 0 0 3px;
+  }
+  #canvas::after {
+    bottom: 0; right: 0;
+    border-width: 0 3px 3px 0;
+  }
+
+  /* Stream panel */
+  .panel {
+    position: absolute;
+    overflow: hidden;
+    background: #1a1a2e;
+  }
+  .panel .stream-wrapper {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    position: relative;
+  }
+  .panel iframe {
+    border: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+  }
+
+  /* Edit mode panel overlay — captures mouse events for move in edit mode */
+  .panel-overlay {
+    display: none;
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 10;
+    cursor: move;
+  }
+  body.edit-mode .panel-overlay {
+    display: block;
+    border: 2px solid #00d4ff;
+    background: rgba(0, 212, 255, 0.05);
+  }
+  body.edit-mode .panel:hover .panel-overlay {
+    background: rgba(0, 212, 255, 0.1);
+  }
+  body.edit-mode .panel.selected .panel-overlay {
+    border-color: #ff6b00;
+    background: rgba(255, 107, 0, 0.08);
+  }
+
+  /* Crop mode — overlay shrinks to thin top bar, stream visible underneath */
+  body.edit-mode .panel.crop-mode .panel-overlay {
+    bottom: auto;
+    height: 28px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 2px solid #ff6b00;
+    border-bottom: none;
+    cursor: move;
+  }
+  /* Crop interaction layer — covers rest of panel for zoom/pan */
+  .crop-layer {
+    display: none;
+    position: absolute;
+    top: 28px; left: 0; right: 0; bottom: 0;
+    z-index: 10;
+    cursor: crosshair;
+    /* Transparent — stream fully visible */
+  }
+  body.edit-mode .panel.crop-mode .crop-layer {
+    display: block;
+  }
+  /* Crop mode label */
+  body.edit-mode .panel.crop-mode .panel-label {
+    top: 5px; left: 6px;
+    color: #ff6b00;
+    font-weight: bold;
+    z-index: 16;
+  }
+  /* Crop crosshair overlay */
+  body.edit-mode .panel.crop-mode .crop-layer::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    border: 2px dashed rgba(255, 107, 0, 0.4);
+    pointer-events: none;
+  }
+
+  /* Audio button — hidden when audio UI is off */
+  body.hide-audio .audio-btn { display: none; }
+  .audio-btn {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    width: 32px;
+    height: 32px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    color: #888;
+    font-size: 16px;
+    cursor: pointer;
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    line-height: 1;
+  }
+  .audio-btn:hover {
+    background: rgba(0, 0, 0, 0.9);
+    border-color: #00d4ff;
+    color: #00d4ff;
+  }
+  .audio-btn.active {
+    background: rgba(0, 212, 255, 0.2);
+    border-color: #00d4ff;
+    color: #00d4ff;
+  }
+
+  /* Resize handles */
+  .resize-handle {
+    display: none;
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: #00d4ff;
+    border: 2px solid #fff;
+    border-radius: 2px;
+    z-index: 20;
+  }
+  body.edit-mode .panel.selected .resize-handle { display: block; }
+  .resize-handle.tl { top: -6px; left: -6px; cursor: nw-resize; }
+  .resize-handle.tr { top: -6px; right: -6px; cursor: ne-resize; }
+  .resize-handle.bl { bottom: -6px; left: -6px; cursor: sw-resize; }
+  .resize-handle.br { bottom: -6px; right: -6px; cursor: se-resize; }
+  .resize-handle.tm { top: -6px; left: 50%; margin-left: -6px; cursor: n-resize; }
+  .resize-handle.bm { bottom: -6px; left: 50%; margin-left: -6px; cursor: s-resize; }
+  .resize-handle.ml { top: 50%; left: -6px; margin-top: -6px; cursor: w-resize; }
+  .resize-handle.mr { top: 50%; right: -6px; margin-top: -6px; cursor: e-resize; }
+
+  /* Panel label */
+  .panel-label {
+    display: none;
+    position: absolute;
+    top: 4px; left: 4px;
+    background: rgba(0,0,0,0.7);
+    color: #fff;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    z-index: 15;
+    pointer-events: none;
+  }
+  body.edit-mode .panel-label { display: block; }
+
+  /* Zoom indicator */
+  .zoom-badge {
+    display: none;
+    position: absolute;
+    top: 4px; right: 4px;
+    background: rgba(0,0,0,0.7);
+    color: #00d4ff;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    z-index: 15;
+    pointer-events: none;
+  }
+  body.edit-mode .panel .zoom-badge { display: block; }
+
+  /* ========== SIDEBAR ========== */
+  #sidebar {
+    display: none;
+    position: fixed;
+    top: 0; right: 0;
+    width: 300px;
+    height: 1080px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    z-index: 1000;
+    overflow-y: auto;
+    border-left: 2px solid #00d4ff;
+    padding: 12px;
+    font-size: 13px;
+  }
+  body.edit-mode #sidebar { display: block; }
+
+  #sidebar h2 {
+    color: #00d4ff;
+    font-size: 16px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #333;
+  }
+  #sidebar h3 {
+    color: #ccc;
+    font-size: 13px;
+    margin: 12px 0 6px;
+  }
+
+  .sidebar-section {
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #2a2a3e;
+  }
+
+  .sidebar-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .sidebar-row label {
+    min-width: 60px;
+    font-size: 12px;
+    color: #999;
+  }
+
+  /* Inputs */
+  #sidebar input[type="text"],
+  #sidebar input[type="number"] {
+    background: #2a2a3e;
+    border: 1px solid #444;
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    width: 100%;
+  }
+  #sidebar input[type="number"] {
+    width: 70px;
+  }
+  #sidebar input:focus {
+    outline: none;
+    border-color: #00d4ff;
+  }
+
+  /* Range slider */
+  #sidebar input[type="range"] {
+    width: 100%;
+    accent-color: #00d4ff;
+  }
+
+  /* Buttons */
+  .btn {
+    background: #2a2a3e;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.15s;
+  }
+  .btn:hover { background: #3a3a5e; }
+  .btn-primary {
+    background: #00d4ff;
+    color: #000;
+    border-color: #00d4ff;
+    font-weight: 600;
+  }
+  .btn-primary:hover { background: #00b8dd; }
+  .btn-danger {
+    background: #ff4444;
+    color: #fff;
+    border-color: #ff4444;
+  }
+  .btn-danger:hover { background: #dd3333; }
+  .btn-sm { padding: 3px 8px; font-size: 11px; }
+
+  /* Preset grid */
+  .preset-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+  .preset-grid .btn { flex: 0 0 auto; font-size: 11px; padding: 4px 8px; }
+
+  /* Panel list */
+  .panel-list-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px;
+    margin-bottom: 4px;
+    background: #2a2a3e;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .panel-list-item:hover { border-color: #444; }
+  .panel-list-item.active { border-color: #ff6b00; }
+  .panel-list-item input {
+    flex: 1;
+  }
+
+  /* Selected panel detail */
+  #panel-detail { display: none; }
+  #panel-detail.visible { display: block; }
+
+  /* Edit mode hint */
+  #edit-hint {
+    display: none;
+    position: fixed;
+    bottom: 8px; left: 8px;
+    background: rgba(0,0,0,0.8);
+    color: #00d4ff;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 999;
+  }
+  body.edit-mode #edit-hint { display: block; }
+
+  /* Notification toast */
+  #toast {
+    position: fixed;
+    bottom: 40px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 212, 255, 0.9);
+    color: #000;
+    padding: 8px 20px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    z-index: 2000;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="canvas">
+  <img id="frame-image" src="" alt="">
+  <div id="canvas-label">1920 x 1080</div>
+</div>
+
+<div id="sidebar">
+  <h2>Overlay Editor</h2>
+
+  <div class="sidebar-section">
+    <h3>Frame Overlay</h3>
+    <input type="file" id="frame-upload" accept="image/*" style="display:none;" onchange="loadFrameImage(this)">
+    <button class="btn" style="width:100%; margin-bottom:6px;" onclick="document.getElementById('frame-upload').click()">Upload Frame Image</button>
+    <div class="sidebar-row" id="frame-controls" style="display:none;">
+      <button class="btn btn-sm" onclick="toggleFrameOpacity()">Opacity: <span id="frame-opacity-label">50%</span></button>
+      <button class="btn btn-sm btn-danger" onclick="removeFrameImage()">Remove</button>
+    </div>
+    <p style="font-size:11px; color:#666;">Upload your OBS frame PNG to align streams with the cutouts. Only visible in edit mode.</p>
+  </div>
+
+  <div class="sidebar-section">
+    <h3>Presets</h3>
+    <div class="preset-grid" id="preset-buttons"></div>
+    <button class="btn btn-primary" style="width:100%; margin-top:6px;" onclick="addPanel()">+ Add Stream</button>
+  </div>
+
+  <div class="sidebar-section">
+    <h3>Resize All Streams</h3>
+    <div class="sidebar-row">
+      <label>W</label>
+      <input type="number" id="all-w" placeholder="width">
+      <label>H</label>
+      <input type="number" id="all-h" placeholder="height">
+    </div>
+    <div class="sidebar-row" style="gap:4px;">
+      <button class="btn btn-sm btn-primary" onclick="resizeAll()">Apply</button>
+      <button class="btn btn-sm" onclick="resizeAllLockRatio(16,9)">Lock 16:9</button>
+      <button class="btn btn-sm" onclick="resizeAllLockRatio(4,3)">Lock 4:3</button>
+      <button class="btn btn-sm" onclick="redistributeGrid()">Re-grid</button>
+    </div>
+    <p style="font-size:11px; color:#666; margin-top:4px;">Re-grid auto-arranges all panels into a centered grid at the new size.</p>
+  </div>
+
+  <div class="sidebar-section">
+    <h3>Streams</h3>
+    <div id="panel-list"></div>
+  </div>
+
+  <div id="panel-detail" class="sidebar-section">
+    <h3>Selected Stream</h3>
+    <div class="sidebar-row">
+      <label>Channel</label>
+      <input type="text" id="det-channel" placeholder="twitch_username" oninput="updateSelectedChannel(this.value)">
+    </div>
+    <div class="sidebar-row">
+      <label>X</label>
+      <input type="number" id="det-x" onchange="updateSelectedPos()">
+      <label>Y</label>
+      <input type="number" id="det-y" onchange="updateSelectedPos()">
+    </div>
+    <div class="sidebar-row">
+      <label>W</label>
+      <input type="number" id="det-w" onchange="updateSelectedSize()">
+      <label>H</label>
+      <input type="number" id="det-h" onchange="updateSelectedSize()">
+    </div>
+    <div class="sidebar-row">
+      <label>Zoom</label>
+      <input type="range" id="det-zoom" min="1" max="4" step="0.05" value="1" oninput="updateSelectedZoom(this.value)">
+      <span id="det-zoom-val" style="min-width:35px;text-align:right;">1.0x</span>
+    </div>
+    <div class="sidebar-row" style="margin-top:4px;">
+      <button class="btn btn-sm" onclick="resetSelectedZoomPan()">Reset Zoom/Pan</button>
+      <button class="btn btn-sm" onclick="copyZoomPanToAll()">Copy Zoom/Pan to All</button>
+      <button class="btn btn-sm" onclick="lockAspect(16,9)">Lock 16:9</button>
+      <button class="btn btn-sm" onclick="lockAspect(4,3)">Lock 4:3</button>
+      <button class="btn btn-sm btn-danger" onclick="removeSelected()">Delete</button>
+    </div>
+    <div class="sidebar-row" style="margin-top:4px;">
+      <button class="btn btn-sm btn-primary" id="btn-crop" onclick="toggleCropMode()">Enter Crop Mode</button>
+      <span style="font-size:11px; color:#888;">See stream while adjusting zoom/pan</span>
+    </div>
+  </div>
+
+  <div class="sidebar-section">
+    <h3>Config</h3>
+    <button class="btn" style="width:100%; margin-bottom:6px;" onclick="exportURL()">Export as URL</button>
+    <button class="btn" style="width:100%; margin-bottom:6px;" onclick="copyConfig()">Copy Config JSON</button>
+    <button class="btn btn-danger" style="width:100%;" onclick="clearConfig()">Reset All</button>
+  </div>
+</div>
+
+<div id="edit-hint">Press <b>E</b> to exit edit mode &nbsp;|&nbsp; <b>A</b> to toggle audio buttons &nbsp;|&nbsp; Scroll to zoom &nbsp;|&nbsp; Shift+drag to pan &nbsp;|&nbsp; Select a stream &rarr; <b>Crop Mode</b> to adjust while watching live</div>
+<div id="toast"></div>
+
+<script>
+// ============================================================
+// STATE
+// ============================================================
+const PARENT = new URLSearchParams(window.location.search).get('parent') || 'thealchemist616.github.io';
+const CANVAS_W = 1920;
+const CANVAS_H = 1080;
+const GAP = 8;
+
+let panels = [];
+let selectedId = null;
+let editMode = false;
+let cropModeId = null; // which panel is in crop mode
+let audioActiveId = null; // which panel has audio
+
+// Drag/resize state
+let dragState = null;
+
+// ============================================================
+// PRESETS — grid layouts
+// ============================================================
+const PRESETS = [
+  { label: '2 (2x1)', cols: 2, rows: 1 },
+  { label: '3 (3x1)', cols: 3, rows: 1 },
+  { label: '4 (2x2)', cols: 2, rows: 2 },
+  { label: '6 (3x2)', cols: 3, rows: 2 },
+  { label: '8 (4x2)', cols: 4, rows: 2 },
+  { label: '10 (5x2)', cols: 5, rows: 2 },
+  { label: '12 (4x3)', cols: 4, rows: 3 },
+  { label: '16 (4x4)', cols: 4, rows: 4 },
+  { label: '24 (6x4)', cols: 6, rows: 4 },
+];
+
+function calcPresetLayout(cols, rows) {
+  // Calculate stream size fitting 16:9 in 1920x1080 with gaps
+  let sw = Math.floor((CANVAS_W - (cols + 1) * GAP) / cols);
+  let sh = Math.floor(sw * 9 / 16);
+  let totalH = rows * sh + (rows + 1) * GAP;
+
+  if (totalH > CANVAS_H) {
+    sh = Math.floor((CANVAS_H - (rows + 1) * GAP) / rows);
+    sw = Math.floor(sh * 16 / 9);
+  }
+
+  const totalW = cols * sw + (cols + 1) * GAP;
+  const totalHFinal = rows * sh + (rows + 1) * GAP;
+  const offsetX = Math.floor((CANVAS_W - totalW) / 2) + GAP;
+  const offsetY = Math.floor((CANVAS_H - totalHFinal) / 2) + GAP;
+
+  const result = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      result.push({
+        x: offsetX + c * (sw + GAP),
+        y: offsetY + r * (sh + GAP),
+        w: sw,
+        h: sh,
+      });
+    }
+  }
+  return result;
+}
+
+function applyPreset(cols, rows) {
+  const layout = calcPresetLayout(cols, rows);
+  const count = cols * rows;
+
+  // Preserve existing channel names
+  const oldChannels = panels.map(p => p.channel);
+
+  panels = [];
+  for (let i = 0; i < count; i++) {
+    panels.push({
+      id: 'p' + Date.now() + '_' + i,
+      channel: oldChannels[i] || `channel${i + 1}`,
+      x: layout[i].x,
+      y: layout[i].y,
+      w: layout[i].w,
+      h: layout[i].h,
+      zoom: 1,
+      panX: 0,
+      panY: 0,
+    });
+  }
+
+  selectedId = null;
+  renderAll();
+  saveConfig();
+}
+
+// ============================================================
+// RENDERING — Incremental (preserves iframes / live streams)
+// ============================================================
+const panelElements = new Map(); // id -> { el, iframe, channelLoaded }
+
+function renderAll() {
+  syncCanvasDOM();
+  updateAllPanelDOM();
+  renderPanelList();
+  renderPanelDetail();
+}
+
+function syncCanvasDOM() {
+  const canvas = document.getElementById('canvas');
+
+  // Remove panels no longer in state
+  const currentIds = new Set(panels.map(p => p.id));
+  for (const [id, entry] of panelElements) {
+    if (!currentIds.has(id)) {
+      entry.el.remove();
+      panelElements.delete(id);
+    }
+  }
+
+  // Create new panels / reorder
+  panels.forEach(p => {
+    if (!panelElements.has(p.id)) {
+      const el = createPanelElement(p);
+      canvas.appendChild(el.el);
+      panelElements.set(p.id, el);
+    }
+  });
+}
+
+function createPanelElement(p) {
+  const div = document.createElement('div');
+  div.className = 'panel';
+  div.dataset.id = p.id;
+
+  // Stream wrapper
+  const wrapper = document.createElement('div');
+  wrapper.className = 'stream-wrapper';
+
+  // Iframe
+  const iframe = document.createElement('iframe');
+  iframe.src = `https://player.twitch.tv/?channel=${encodeURIComponent(p.channel)}&parent=${PARENT}&muted=true&autoplay=true`;
+  iframe.allow = 'autoplay; encrypted-media';
+  iframe.allowFullscreen = true;
+  wrapper.appendChild(iframe);
+
+  // Edit overlay (for move in layout mode)
+  const overlay = document.createElement('div');
+  overlay.className = 'panel-overlay';
+  overlay.addEventListener('mousedown', e => onPanelMouseDown(e, p.id));
+  overlay.addEventListener('wheel', e => onPanelWheel(e, p.id), { passive: false });
+
+  // Crop layer (visible only in crop mode — captures zoom/pan)
+  const cropLayer = document.createElement('div');
+  cropLayer.className = 'crop-layer';
+  cropLayer.addEventListener('mousedown', e => onCropMouseDown(e, p.id));
+  cropLayer.addEventListener('wheel', e => onPanelWheel(e, p.id), { passive: false });
+
+  // Resize handles
+  const handles = ['tl','tr','bl','br','tm','bm','ml','mr'];
+  handles.forEach(h => {
+    const hEl = document.createElement('div');
+    hEl.className = 'resize-handle ' + h;
+    hEl.addEventListener('mousedown', e => {
+      e.stopPropagation();
+      onResizeMouseDown(e, p.id, h);
+    });
+    div.appendChild(hEl);
+  });
+
+  // Audio button — always visible
+  const audioBtn = document.createElement('button');
+  audioBtn.className = 'audio-btn';
+  audioBtn.innerHTML = '&#x1f507;';
+  audioBtn.title = 'Click to unmute this stream';
+  audioBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    toggleAudio(p.id);
+  });
+
+  // Label
+  const label = document.createElement('div');
+  label.className = 'panel-label';
+
+  // Zoom badge
+  const badge = document.createElement('div');
+  badge.className = 'zoom-badge';
+
+  div.appendChild(wrapper);
+  div.appendChild(overlay);
+  div.appendChild(cropLayer);
+  div.appendChild(audioBtn);
+  div.appendChild(label);
+  div.appendChild(badge);
+
+  return { el: div, iframe, audioBtn, channelLoaded: p.channel };
+}
+
+function updateAllPanelDOM() {
+  panels.forEach(p => {
+    const entry = panelElements.get(p.id);
+    if (!entry) return;
+    const el = entry.el;
+
+    // Update classes
+    el.className = 'panel'
+      + (p.id === selectedId ? ' selected' : '')
+      + (p.id === cropModeId ? ' crop-mode' : '');
+
+    // Position and size
+    el.style.left = p.x + 'px';
+    el.style.top = p.y + 'px';
+    el.style.width = p.w + 'px';
+    el.style.height = p.h + 'px';
+
+    // Iframe zoom/pan (no reload)
+    const iframe = entry.iframe;
+    iframe.style.width = p.w + 'px';
+    iframe.style.height = p.h + 'px';
+    iframe.style.transform = `scale(${p.zoom})`;
+    iframe.style.left = p.panX + 'px';
+    iframe.style.top = p.panY + 'px';
+
+    // Only reload iframe if channel changed
+    if (entry.channelLoaded !== p.channel) {
+      iframe.src = `https://player.twitch.tv/?channel=${encodeURIComponent(p.channel)}&parent=${PARENT}&muted=true&autoplay=true`;
+      entry.channelLoaded = p.channel;
+    }
+
+    // Label
+    const label = el.querySelector('.panel-label');
+    if (label) label.textContent = p.channel + (p.id === cropModeId ? ' [CROP]' : '');
+
+    // Zoom badge
+    const badge = el.querySelector('.zoom-badge');
+    if (badge) badge.textContent = p.zoom > 1 ? p.zoom.toFixed(1) + 'x' : '';
+  });
+}
+
+function renderPanelList() {
+  const list = document.getElementById('panel-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  panels.forEach((p, i) => {
+    const item = document.createElement('div');
+    item.className = 'panel-list-item' + (p.id === selectedId ? ' active' : '');
+    item.onclick = () => { selectedId = p.id; renderAll(); };
+
+    const num = document.createElement('span');
+    num.textContent = (i + 1) + '.';
+    num.style.color = '#666';
+    num.style.fontSize = '11px';
+    num.style.minWidth = '18px';
+
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = p.channel;
+    inp.placeholder = 'channel_name';
+    inp.onclick = e => e.stopPropagation();
+    inp.oninput = () => {
+      p.channel = inp.value;
+      renderCanvas();
+      saveConfig();
+    };
+
+    item.appendChild(num);
+    item.appendChild(inp);
+    list.appendChild(item);
+  });
+}
+
+function renderPanelDetail() {
+  const detail = document.getElementById('panel-detail');
+  if (!detail) return;
+  const p = panels.find(p => p.id === selectedId);
+  if (!p) {
+    detail.classList.remove('visible');
+    return;
+  }
+  detail.classList.add('visible');
+
+  document.getElementById('det-channel').value = p.channel;
+  document.getElementById('det-x').value = Math.round(p.x);
+  document.getElementById('det-y').value = Math.round(p.y);
+  document.getElementById('det-w').value = Math.round(p.w);
+  document.getElementById('det-h').value = Math.round(p.h);
+  document.getElementById('det-zoom').value = p.zoom;
+  document.getElementById('det-zoom-val').textContent = p.zoom.toFixed(1) + 'x';
+
+  // Update crop mode button
+  const cropBtn = document.getElementById('btn-crop');
+  if (cropBtn) {
+    const inCrop = cropModeId === p.id;
+    cropBtn.textContent = inCrop ? 'Exit Crop Mode' : 'Enter Crop Mode';
+    cropBtn.className = inCrop ? 'btn btn-sm btn-danger' : 'btn btn-sm btn-primary';
+  }
+}
+
+// ============================================================
+// INTERACTIONS — Move
+// ============================================================
+// ============================================================
+// AUDIO TOGGLE
+// ============================================================
+function toggleAudio(id) {
+  // Toggle: if already active, mute it. Otherwise switch to this one.
+  if (audioActiveId === id) {
+    audioActiveId = null;
+  } else {
+    audioActiveId = id;
+  }
+
+  // Update all iframes — unmute the active one, mute the rest
+  for (const [panelId, entry] of panelElements) {
+    const p = panels.find(p => p.id === panelId);
+    if (!p || !entry.iframe) continue;
+    const shouldUnmute = (panelId === audioActiveId);
+    const currentSrc = entry.iframe.src;
+    const newSrc = currentSrc
+      .replace(/muted=(true|false)/, `muted=${!shouldUnmute}`);
+    if (newSrc !== currentSrc) {
+      entry.iframe.src = newSrc;
+    }
+
+    // Update button and slider appearance
+    if (entry.audioBtn) {
+      entry.audioBtn.classList.toggle('active', shouldUnmute);
+      entry.audioBtn.innerHTML = shouldUnmute ? '&#x1f50a;' : '&#x1f507;';
+      entry.audioBtn.title = shouldUnmute ? 'Click to mute' : 'Click to unmute this stream';
+    }
+  }
+
+  showToast(audioActiveId
+    ? 'Audio: ' + (panels.find(p => p.id === audioActiveId)?.channel || '')
+    : 'All streams muted');
+}
+
+
+function onPanelMouseDown(e, id) {
+  e.preventDefault();
+
+  // Shift+click = pan mode (in layout mode)
+  if (e.shiftKey) {
+    const p = panels.find(p => p.id === id);
+    if (!p || p.zoom <= 1) return;
+    dragState = {
+      type: 'pan',
+      panelId: id,
+      startX: e.clientX,
+      startY: e.clientY,
+      origPanX: p.panX,
+      origPanY: p.panY,
+    };
+    selectedId = id;
+    renderAll();
+    return;
+  }
+
+  selectedId = id;
+  const p = panels.find(p => p.id === id);
+  if (!p) return;
+
+  dragState = {
+    type: 'move',
+    panelId: id,
+    startX: e.clientX,
+    startY: e.clientY,
+    origX: p.x,
+    origY: p.y,
+  };
+  renderAll();
+}
+
+// ============================================================
+// INTERACTIONS — Crop mode (drag = pan, stream visible)
+// ============================================================
+function onCropMouseDown(e, id) {
+  e.preventDefault();
+  const p = panels.find(p => p.id === id);
+  if (!p) return;
+
+  selectedId = id;
+  dragState = {
+    type: 'pan',
+    panelId: id,
+    startX: e.clientX,
+    startY: e.clientY,
+    origPanX: p.panX,
+    origPanY: p.panY,
+  };
+  renderAll();
+}
+
+function toggleCropMode() {
+  if (!selectedId) return;
+  if (cropModeId === selectedId) {
+    cropModeId = null;
+  } else {
+    cropModeId = selectedId;
+    // Auto-zoom to 1.5x if still at 1x so they can see it working
+    const p = panels.find(p => p.id === selectedId);
+    if (p && p.zoom <= 1) {
+      p.zoom = 1.5;
+      clampPan(p);
+      saveConfig();
+    }
+  }
+  renderAll();
+  renderPanelDetail();
+}
+
+// ============================================================
+// INTERACTIONS — Resize
+// ============================================================
+function onResizeMouseDown(e, id, handle) {
+  e.preventDefault();
+  selectedId = id;
+  const p = panels.find(p => p.id === id);
+  if (!p) return;
+
+  dragState = {
+    type: 'resize',
+    panelId: id,
+    handle: handle,
+    startX: e.clientX,
+    startY: e.clientY,
+    origX: p.x,
+    origY: p.y,
+    origW: p.w,
+    origH: p.h,
+    shiftHeld: e.shiftKey,
+  };
+  renderAll();
+}
+
+// ============================================================
+// INTERACTIONS — Zoom (scroll wheel)
+// ============================================================
+function onPanelWheel(e, id) {
+  e.preventDefault();
+  const p = panels.find(p => p.id === id);
+  if (!p) return;
+
+  const delta = e.deltaY > 0 ? -0.1 : 0.1;
+  p.zoom = Math.max(1, Math.min(4, p.zoom + delta));
+
+  // Clamp pan when zooming out
+  clampPan(p);
+
+  selectedId = id;
+  renderAll();
+  saveConfig();
+}
+
+// ============================================================
+// GLOBAL MOUSE MOVE / UP
+// ============================================================
+document.addEventListener('mousemove', e => {
+  if (!dragState) return;
+  const dx = e.clientX - dragState.startX;
+  const dy = e.clientY - dragState.startY;
+  const p = panels.find(p => p.id === dragState.panelId);
+  if (!p) return;
+
+  if (dragState.type === 'move') {
+    p.x = Math.max(0, Math.min(CANVAS_W - p.w, dragState.origX + dx));
+    p.y = Math.max(0, Math.min(CANVAS_H - p.h, dragState.origY + dy));
+    updatePanelDOM(p);
+    renderPanelDetail();
+  }
+  else if (dragState.type === 'resize') {
+    const h = dragState.handle;
+    let newX = dragState.origX;
+    let newY = dragState.origY;
+    let newW = dragState.origW;
+    let newH = dragState.origH;
+
+    if (h.includes('r')) newW = Math.max(80, dragState.origW + dx);
+    if (h.includes('l')) { newW = Math.max(80, dragState.origW - dx); newX = dragState.origX + dx; }
+    if (h.includes('b')) newH = Math.max(45, dragState.origH + dy);
+    if (h.includes('t')) { newH = Math.max(45, dragState.origH - dy); newY = dragState.origY + dy; }
+
+    // Shift locks 16:9
+    if (e.shiftKey || dragState.shiftHeld) {
+      if (h === 'ml' || h === 'mr') {
+        newH = Math.round(newW * 9 / 16);
+      } else {
+        newH = Math.round(newW * 9 / 16);
+      }
+    }
+
+    p.x = newX; p.y = newY; p.w = newW; p.h = newH;
+    clampPan(p);
+    updatePanelDOM(p);
+    renderPanelDetail();
+  }
+  else if (dragState.type === 'pan') {
+    p.panX = dragState.origPanX + dx;
+    p.panY = dragState.origPanY + dy;
+    clampPan(p);
+    updatePanelDOM(p);
+  }
+});
+
+document.addEventListener('mouseup', () => {
+  if (dragState) {
+    dragState = null;
+    saveConfig();
+  }
+});
+
+// Fast DOM update without full re-render
+function updatePanelDOM(p) {
+  const el = document.querySelector(`.panel[data-id="${p.id}"]`);
+  if (!el) return;
+  el.style.left = p.x + 'px';
+  el.style.top = p.y + 'px';
+  el.style.width = p.w + 'px';
+  el.style.height = p.h + 'px';
+
+  const iframe = el.querySelector('iframe');
+  if (iframe) {
+    iframe.style.width = p.w + 'px';
+    iframe.style.height = p.h + 'px';
+    iframe.style.transform = `scale(${p.zoom})`;
+    iframe.style.left = p.panX + 'px';
+    iframe.style.top = p.panY + 'px';
+  }
+
+  const badge = el.querySelector('.zoom-badge');
+  if (badge) badge.textContent = p.zoom > 1 ? p.zoom.toFixed(1) + 'x' : '';
+}
+
+function clampPan(p) {
+  if (p.zoom <= 1) { p.panX = 0; p.panY = 0; return; }
+  const maxPanX = p.w * (p.zoom - 1);
+  const maxPanY = p.h * (p.zoom - 1);
+  p.panX = Math.max(-maxPanX, Math.min(0, p.panX));
+  p.panY = Math.max(-maxPanY, Math.min(0, p.panY));
+}
+
+// ============================================================
+// SIDEBAR ACTIONS
+// ============================================================
+// ============================================================
+// RESIZE ALL
+// ============================================================
+function resizeAll() {
+  const w = parseInt(document.getElementById('all-w').value);
+  const h = parseInt(document.getElementById('all-h').value);
+  if (!w && !h) return;
+  panels.forEach(p => {
+    if (w) p.w = w;
+    if (h) p.h = h;
+    clampPan(p);
+  });
+  renderAll();
+  saveConfig();
+}
+
+function resizeAllLockRatio(rw, rh) {
+  const w = parseInt(document.getElementById('all-w').value);
+  const h = parseInt(document.getElementById('all-h').value);
+  if (!w && !h) return;
+  panels.forEach(p => {
+    if (w) { p.w = w; p.h = Math.round(w * rh / rw); }
+    else if (h) { p.h = h; p.w = Math.round(h * rw / rh); }
+    clampPan(p);
+  });
+  renderAll();
+  saveConfig();
+}
+
+function redistributeGrid() {
+  if (panels.length === 0) return;
+  const w = parseInt(document.getElementById('all-w').value) || panels[0].w;
+  const h = parseInt(document.getElementById('all-h').value) || panels[0].h;
+  const count = panels.length;
+
+  // Find best cols/rows that fit the canvas
+  let bestCols = 1;
+  for (let c = 1; c <= count; c++) {
+    const r = Math.ceil(count / c);
+    const totalW = c * w + (c + 1) * GAP;
+    const totalH = r * h + (r + 1) * GAP;
+    if (totalW <= CANVAS_W && totalH <= CANVAS_H) { bestCols = c; }
+  }
+  const rows = Math.ceil(count / bestCols);
+  const totalW = bestCols * w + (bestCols + 1) * GAP;
+  const totalH = rows * h + (rows + 1) * GAP;
+  const offsetX = Math.floor((CANVAS_W - totalW) / 2) + GAP;
+  const offsetY = Math.floor((CANVAS_H - totalH) / 2) + GAP;
+
+  panels.forEach((p, i) => {
+    const col = i % bestCols;
+    const row = Math.floor(i / bestCols);
+    p.x = offsetX + col * (w + GAP);
+    p.y = offsetY + row * (h + GAP);
+    p.w = w;
+    p.h = h;
+    clampPan(p);
+  });
+  renderAll();
+  saveConfig();
+}
+
+function updateSelectedChannel(val) {
+  const p = panels.find(p => p.id === selectedId);
+  if (!p) return;
+  p.channel = val;
+  renderCanvas();
+  renderPanelList();
+  saveConfig();
+}
+
+function updateSelectedPos() {
+  const p = panels.find(p => p.id === selectedId);
+  if (!p) return;
+  p.x = parseInt(document.getElementById('det-x').value) || 0;
+  p.y = parseInt(document.getElementById('det-y').value) || 0;
+  renderCanvas();
+  saveConfig();
+}
+
+function updateSelectedSize() {
+  const p = panels.find(p => p.id === selectedId);
+  if (!p) return;
+  p.w = parseInt(document.getElementById('det-w').value) || 100;
+  p.h = parseInt(document.getElementById('det-h').value) || 56;
+  clampPan(p);
+  renderCanvas();
+  saveConfig();
+}
+
+function updateSelectedZoom(val) {
+  const p = panels.find(p => p.id === selectedId);
+  if (!p) return;
+  p.zoom = parseFloat(val);
+  clampPan(p);
+  document.getElementById('det-zoom-val').textContent = p.zoom.toFixed(1) + 'x';
+  renderCanvas();
+  saveConfig();
+}
+
+function resetSelectedZoomPan() {
+  const p = panels.find(p => p.id === selectedId);
+  if (!p) return;
+  p.zoom = 1; p.panX = 0; p.panY = 0;
+  renderAll();
+  saveConfig();
+}
+
+function copyZoomPanToAll() {
+  const src = panels.find(p => p.id === selectedId);
+  if (!src) return;
+  panels.forEach(p => {
+    if (p.id === src.id) return;
+    p.zoom = src.zoom;
+    p.panX = src.panX;
+    p.panY = src.panY;
+    clampPan(p);
+  });
+  renderAll();
+  saveConfig();
+  showToast('Zoom/pan copied to all streams');
+}
+
+function lockAspect(rw, rh) {
+  const p = panels.find(p => p.id === selectedId);
+  if (!p) return;
+  p.h = Math.round(p.w * rh / rw);
+  clampPan(p);
+  renderAll();
+  saveConfig();
+}
+
+function addPanel() {
+  const id = 'p' + Date.now();
+  panels.push({
+    id,
+    channel: `channel${panels.length + 1}`,
+    x: 100 + panels.length * 20,
+    y: 100 + panels.length * 20,
+    w: 400,
+    h: 225,
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+  });
+  selectedId = id;
+  renderAll();
+  saveConfig();
+}
+
+function removeSelected() {
+  panels = panels.filter(p => p.id !== selectedId);
+  selectedId = null;
+  renderAll();
+  saveConfig();
+}
+
+// ============================================================
+// CONFIG PERSISTENCE
+// ============================================================
+function getConfig() {
+  return {
+    panels: panels.map(p => ({
+      channel: p.channel,
+      x: Math.round(p.x),
+      y: Math.round(p.y),
+      w: Math.round(p.w),
+      h: Math.round(p.h),
+      zoom: Math.round(p.zoom * 100) / 100,
+      panX: Math.round(p.panX),
+      panY: Math.round(p.panY),
+    }))
+  };
+}
+
+function saveConfig() {
+  try {
+    localStorage.setItem('overlay-config', JSON.stringify(getConfig()));
+  } catch (e) {}
+}
+
+function loadConfig() {
+  // Priority: URL hash > localStorage > default
+  const hash = window.location.hash.slice(1);
+  let config = null;
+
+  if (hash) {
+    try {
+      config = JSON.parse(atob(hash));
+    } catch (e) {}
+  }
+
+  if (!config) {
+    try {
+      const stored = localStorage.getItem('overlay-config');
+      if (stored) config = JSON.parse(stored);
+    } catch (e) {}
+  }
+
+  if (config && config.panels && config.panels.length > 0) {
+    panels = config.panels.map((p, i) => ({
+      id: 'p' + Date.now() + '_' + i,
+      channel: p.channel || `channel${i + 1}`,
+      x: p.x || 0,
+      y: p.y || 0,
+      w: p.w || 400,
+      h: p.h || 225,
+      zoom: p.zoom || 1,
+      panX: p.panX || 0,
+      panY: p.panY || 0,
+    }));
+  } else {
+    // Default: 6-stream 3x2 layout
+    applyPreset(3, 2);
+    return; // applyPreset calls renderAll
+  }
+
+  renderAll();
+}
+
+
+// ============================================================
+// FRAME OVERLAY IMAGE
+// ============================================================
+let frameOpacity = 0.5;
+
+function loadFrameImage(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const img = document.getElementById('frame-image');
+    img.src = e.target.result;
+    img.classList.add('loaded');
+    document.getElementById('frame-controls').style.display = 'flex';
+    showToast('Frame loaded — align your streams underneath');
+  };
+  reader.readAsDataURL(file);
+}
+
+function toggleFrameOpacity() {
+  const steps = [0.25, 0.5, 0.75, 1.0];
+  const idx = steps.indexOf(frameOpacity);
+  frameOpacity = steps[(idx + 1) % steps.length];
+  document.getElementById('frame-image').style.opacity = frameOpacity;
+  document.getElementById('frame-opacity-label').textContent = Math.round(frameOpacity * 100) + '%';
+}
+
+function removeFrameImage() {
+  const img = document.getElementById('frame-image');
+  img.src = '';
+  img.classList.remove('loaded');
+  document.getElementById('frame-controls').style.display = 'none';
+  document.getElementById('frame-upload').value = '';
+}
+
+function exportURL() {
+  const config = getConfig();
+  const encoded = btoa(JSON.stringify(config));
+  const url = window.location.origin + window.location.pathname + '#' + encoded;
+
+  navigator.clipboard.writeText(url).then(() => {
+    showToast('URL copied to clipboard!');
+  }).catch(() => {
+    prompt('Copy this URL:', url);
+  });
+}
+
+function copyConfig() {
+  const json = JSON.stringify(getConfig(), null, 2);
+  navigator.clipboard.writeText(json).then(() => {
+    showToast('Config JSON copied!');
+  }).catch(() => {
+    prompt('Copy this config:', json);
+  });
+}
+
+function clearConfig() {
+  if (!confirm('Reset all panels to default 6-stream layout?')) return;
+  localStorage.removeItem('overlay-config');
+  window.location.hash = '';
+  applyPreset(3, 2);
+}
+
+// ============================================================
+// EDIT MODE TOGGLE
+// ============================================================
+function setEditMode(on) {
+  editMode = on;
+  document.body.classList.toggle('edit-mode', on);
+  if (!on) { selectedId = null; cropModeId = null; }
+  renderAll();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+  if (e.key === 'e' || e.key === 'E') {
+    setEditMode(!editMode);
+  }
+  if (e.key === 'a' || e.key === 'A') {
+    document.body.classList.toggle('hide-audio');
+  }
+  if (e.key === 'Delete' && selectedId && editMode) {
+    removeSelected();
+  }
+  if (e.key === 'Escape' && editMode) {
+    if (cropModeId) { cropModeId = null; renderAll(); }
+    else if (selectedId) { selectedId = null; renderAll(); }
+    else setEditMode(false);
+  }
+});
+
+// Click on canvas background deselects
+document.getElementById('canvas').addEventListener('mousedown', e => {
+  if (e.target === document.getElementById('canvas') && editMode) {
+    selectedId = null;
+    renderAll();
+  }
+});
+
+// ============================================================
+// TOAST
+// ============================================================
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2000);
+}
+
+// ============================================================
+// INIT
+// ============================================================
+function init() {
+  // Build preset buttons
+  const presetContainer = document.getElementById('preset-buttons');
+  PRESETS.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'btn';
+    btn.textContent = p.label;
+    btn.onclick = () => applyPreset(p.cols, p.rows);
+    presetContainer.appendChild(btn);
+  });
+
+  loadConfig();
+}
+
+init();
+</script>
+</body>
+</html>
