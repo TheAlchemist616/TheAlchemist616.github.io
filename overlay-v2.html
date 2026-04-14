@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Multi-Stream Race Overlay</title>
+<script src="https://player.twitch.tv/js/embed/v1.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -101,6 +102,8 @@
   }
   .panel iframe {
     border: none;
+  }
+  .player-container {
     position: absolute;
     top: 0;
     left: 0;
@@ -641,12 +644,31 @@ function createPanelElement(p) {
   const wrapper = document.createElement('div');
   wrapper.className = 'stream-wrapper';
 
-  // Iframe
-  const iframe = document.createElement('iframe');
-  iframe.src = `https://player.twitch.tv/?channel=${encodeURIComponent(p.channel)}&parent=${PARENT}&muted=true&autoplay=true`;
-  iframe.allow = 'autoplay; encrypted-media';
-  iframe.allowFullscreen = true;
-  wrapper.appendChild(iframe);
+  // Player container — zoom/pan applied here
+  const playerContainer = document.createElement('div');
+  playerContainer.className = 'player-container';
+  const playerTarget = document.createElement('div');
+  playerTarget.id = 'tp-' + p.id;
+  playerContainer.appendChild(playerTarget);
+  wrapper.appendChild(playerContainer);
+
+  // Create Twitch Player via API
+  let player = null;
+  try {
+    player = new Twitch.Player(playerTarget.id, {
+      channel: p.channel,
+      parent: [PARENT],
+      muted: true,
+      autoplay: true,
+      width: p.w,
+      height: p.h,
+    });
+  } catch (e) {
+    // Fallback for local file:// testing
+    playerTarget.style.width = p.w + 'px';
+    playerTarget.style.height = p.h + 'px';
+    playerTarget.style.background = '#1a1a2e';
+  }
 
   // Edit overlay (for move in layout mode)
   const overlay = document.createElement('div');
@@ -697,7 +719,7 @@ function createPanelElement(p) {
   div.appendChild(label);
   div.appendChild(badge);
 
-  return { el: div, iframe, audioBtn, channelLoaded: p.channel };
+  return { el: div, player, playerContainer, audioBtn, channelLoaded: p.channel };
 }
 
 function updateAllPanelDOM() {
@@ -717,17 +739,30 @@ function updateAllPanelDOM() {
     el.style.width = p.w + 'px';
     el.style.height = p.h + 'px';
 
-    // Iframe zoom/pan (no reload)
-    const iframe = entry.iframe;
-    iframe.style.width = p.w + 'px';
-    iframe.style.height = p.h + 'px';
-    iframe.style.transform = `scale(${p.zoom})`;
-    iframe.style.left = p.panX + 'px';
-    iframe.style.top = p.panY + 'px';
+    // Player container zoom/pan (no reload)
+    const pc = entry.playerContainer;
+    if (pc) {
+      pc.style.width = p.w + 'px';
+      pc.style.height = p.h + 'px';
+      pc.style.transform = `scale(${p.zoom})`;
+      pc.style.left = p.panX + 'px';
+      pc.style.top = p.panY + 'px';
+    }
 
-    // Only reload iframe if channel changed
+    // Resize the player iframe if it exists
+    if (entry.player && entry.player.getIframe) {
+      const iframe = entry.player.getIframe();
+      if (iframe) {
+        iframe.width = p.w;
+        iframe.height = p.h;
+      }
+    }
+
+    // Switch channel via API (no reload)
     if (entry.channelLoaded !== p.channel) {
-      iframe.src = `https://player.twitch.tv/?channel=${encodeURIComponent(p.channel)}&parent=${PARENT}&muted=true&autoplay=true`;
+      if (entry.player && entry.player.setChannel) {
+        entry.player.setChannel(p.channel);
+      }
       entry.channelLoaded = p.channel;
     }
 
@@ -815,19 +850,18 @@ function toggleAudio(id) {
     audioActiveId = id;
   }
 
-  // Update all iframes — unmute the active one, mute the rest
+  // Use Player API to mute/unmute — no iframe reload needed
   for (const [panelId, entry] of panelElements) {
-    const p = panels.find(p => p.id === panelId);
-    if (!p || !entry.iframe) continue;
     const shouldUnmute = (panelId === audioActiveId);
-    const currentSrc = entry.iframe.src;
-    const newSrc = currentSrc
-      .replace(/muted=(true|false)/, `muted=${!shouldUnmute}`);
-    if (newSrc !== currentSrc) {
-      entry.iframe.src = newSrc;
+
+    if (entry.player) {
+      try {
+        entry.player.setMuted(!shouldUnmute);
+        if (shouldUnmute) entry.player.setVolume(1.0);
+      } catch (e) {}
     }
 
-    // Update button and slider appearance
+    // Update button appearance
     if (entry.audioBtn) {
       entry.audioBtn.classList.toggle('active', shouldUnmute);
       entry.audioBtn.innerHTML = shouldUnmute ? '&#x1f50a;' : '&#x1f507;';
@@ -1023,13 +1057,13 @@ function updatePanelDOM(p) {
   el.style.width = p.w + 'px';
   el.style.height = p.h + 'px';
 
-  const iframe = el.querySelector('iframe');
-  if (iframe) {
-    iframe.style.width = p.w + 'px';
-    iframe.style.height = p.h + 'px';
-    iframe.style.transform = `scale(${p.zoom})`;
-    iframe.style.left = p.panX + 'px';
-    iframe.style.top = p.panY + 'px';
+  const entry = panelElements.get(p.id);
+  if (entry && entry.playerContainer) {
+    entry.playerContainer.style.width = p.w + 'px';
+    entry.playerContainer.style.height = p.h + 'px';
+    entry.playerContainer.style.transform = `scale(${p.zoom})`;
+    entry.playerContainer.style.left = p.panX + 'px';
+    entry.playerContainer.style.top = p.panY + 'px';
   }
 
   const badge = el.querySelector('.zoom-badge');
