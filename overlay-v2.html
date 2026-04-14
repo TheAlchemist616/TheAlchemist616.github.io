@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>Multi-Stream Race Overlay</title>
 <script src="https://player.twitch.tv/js/embed/v1.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@700&family=Orbitron:wght@700&family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -484,6 +485,33 @@
     <div class="sidebar-row" style="gap:4px;">
       <button class="btn btn-sm btn-primary" onclick="connectRaceTimer()">Connect</button>
       <button class="btn btn-sm btn-danger" onclick="disconnectRaceTimer()">Remove</button>
+    </div>
+    <div class="sidebar-row">
+      <label>Font</label>
+      <select id="timer-font" onchange="updateTimerStyle()">
+        <option value="'Courier New', monospace">Courier New</option>
+        <option value="'Roboto Mono', monospace">Roboto Mono</option>
+        <option value="'Orbitron', sans-serif">Orbitron</option>
+        <option value="'Press Start 2P', monospace">Press Start 2P</option>
+        <option value="'Segment7', monospace">Segment7 (LED)</option>
+        <option value="Impact, sans-serif">Impact</option>
+        <option value="'Arial Black', sans-serif">Arial Black</option>
+        <option value="'Trebuchet MS', sans-serif">Trebuchet MS</option>
+      </select>
+    </div>
+    <div class="sidebar-row">
+      <label>Size</label>
+      <input type="range" id="timer-size" min="20" max="120" value="48" oninput="updateTimerStyle()">
+      <span id="timer-size-val" style="min-width:35px;text-align:right;">48px</span>
+    </div>
+    <div class="sidebar-row">
+      <label>Color</label>
+      <input type="color" id="timer-color" value="#00d4ff" oninput="updateTimerStyle()" style="width:40px;height:28px;padding:0;border:none;cursor:pointer;">
+      <label>BG</label>
+      <input type="color" id="timer-bg" value="#000000" oninput="updateTimerStyle()" style="width:40px;height:28px;padding:0;border:none;cursor:pointer;">
+      <label style="min-width:auto;">
+        <input type="checkbox" id="timer-bg-transparent" onchange="updateTimerStyle()"> None
+      </label>
     </div>
     <div id="racetime-status" style="font-size:11px; color:#666; margin-top:4px;">Not connected</div>
   </div>
@@ -1386,6 +1414,11 @@ function getConfig() {
       room: raceTimerState.room || '',
       x: Math.round(raceTimerState.x),
       y: Math.round(raceTimerState.y),
+      font: raceTimerState.font || "'Courier New', monospace",
+      size: raceTimerState.size || 48,
+      color: raceTimerState.color || '#00d4ff',
+      bg: raceTimerState.bg || '#000000',
+      bgTransparent: raceTimerState.bgTransparent || false,
     }
   };
 }
@@ -1435,11 +1468,34 @@ function loadConfig() {
   }
 
   // Restore timer if saved
-  if (config.timer && config.timer.room) {
+  if (config.timer) {
     raceTimerState.x = config.timer.x || 760;
     raceTimerState.y = config.timer.y || 520;
-    document.getElementById('racetime-url').value = config.timer.room;
-    connectRaceTimer();
+    if (config.timer.font) {
+      raceTimerState.font = config.timer.font;
+      document.getElementById('timer-font').value = config.timer.font;
+    }
+    if (config.timer.size) {
+      raceTimerState.size = config.timer.size;
+      document.getElementById('timer-size').value = config.timer.size;
+    }
+    if (config.timer.color) {
+      raceTimerState.color = config.timer.color;
+      document.getElementById('timer-color').value = config.timer.color;
+    }
+    if (config.timer.bg) {
+      raceTimerState.bg = config.timer.bg;
+      document.getElementById('timer-bg').value = config.timer.bg;
+    }
+    if (config.timer.bgTransparent) {
+      raceTimerState.bgTransparent = config.timer.bgTransparent;
+      document.getElementById('timer-bg-transparent').checked = true;
+    }
+    if (config.timer.room) {
+      document.getElementById('racetime-url').value = config.timer.room;
+      connectRaceTimer();
+    }
+    updateTimerStyle();
   }
 
   renderAll();
@@ -1593,6 +1649,34 @@ let raceTimerState = {
   x: 760,
   y: 520,
 };
+
+function updateTimerStyle() {
+  const timerEl = document.getElementById('race-timer');
+  const font = document.getElementById('timer-font').value;
+  const size = document.getElementById('timer-size').value;
+  const color = document.getElementById('timer-color').value;
+  const bg = document.getElementById('timer-bg').value;
+  const bgTransparent = document.getElementById('timer-bg-transparent').checked;
+
+  timerEl.style.fontFamily = font;
+  timerEl.style.fontSize = size + 'px';
+  timerEl.style.color = color;
+  timerEl.style.background = bgTransparent ? 'transparent' : bg + 'dd';
+  timerEl.style.textShadow = `0 0 10px ${color}44`;
+
+  document.getElementById('timer-size-val').textContent = size + 'px';
+
+  // Update small text proportionally
+  const smallEl = timerEl.querySelector('.timer-small');
+  if (smallEl) smallEl.style.fontSize = Math.round(size * 0.65) + 'px';
+
+  raceTimerState.font = font;
+  raceTimerState.size = parseInt(size);
+  raceTimerState.color = color;
+  raceTimerState.bg = bg;
+  raceTimerState.bgTransparent = bgTransparent;
+  saveConfig();
+}
 
 function connectRaceTimer() {
   const input = document.getElementById('racetime-url').value.trim();
