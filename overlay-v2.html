@@ -478,6 +478,34 @@
   </div>
 
   <div class="sidebar-section">
+    <h3>Twitch Chat Commands</h3>
+    <div class="sidebar-row">
+      <input type="text" id="chat-channel" placeholder="twitch channel name (e.g. thealchemist616)">
+    </div>
+    <div class="sidebar-row" style="gap:4px;">
+      <button class="btn btn-sm btn-primary" onclick="connectChat()">Connect</button>
+      <button class="btn btn-sm btn-danger" onclick="disconnectChat()">Disconnect</button>
+      <button class="btn btn-sm" onclick="toggleCommandHelp()">Commands</button>
+    </div>
+    <div id="chat-status" style="font-size:11px; color:#666; margin-top:4px;">Not connected</div>
+    <div id="command-help" style="display:none; font-size:11px; color:#aaa; margin-top:6px; background:#0d0d1a; padding:8px; border-radius:4px; line-height:1.5;">
+      <b style="color:#00d4ff;">Broadcaster + mods only:</b><br>
+      <code>!audio &lt;channel&gt;</code> — switch audio<br>
+      <code>!mute</code> — mute all streams<br>
+      <code>!sync</code> — reload all streams<br>
+      <code>!layout &lt;cols&gt;x&lt;rows&gt;</code> — e.g. 3x2<br>
+      <code>!add &lt;channel&gt;</code> — add stream<br>
+      <code>!remove &lt;channel&gt;</code> — remove stream<br>
+      <code>!change &lt;old&gt; &lt;new&gt;</code> — swap streamer<br>
+      <code>!set &lt;slot#&gt; &lt;new&gt;</code> — swap by slot<br>
+      <code>!zoom &lt;channel&gt; &lt;1-8&gt;</code><br>
+      <code>!pan &lt;channel&gt; &lt;x%&gt; &lt;y%&gt;</code><br>
+      <code>!timer &lt;category/room&gt;</code> — racetime<br>
+      <code>!reload</code> — reload overlay
+    </div>
+  </div>
+
+  <div class="sidebar-section">
     <h3>Racetime.gg Timer</h3>
     <div class="sidebar-row">
       <input type="text" id="racetime-url" placeholder="e.g. alttp/dazzling-dedede-1908">
@@ -1443,6 +1471,9 @@ function getConfig() {
       color: raceTimerState.color || '#00d4ff',
       bg: raceTimerState.bg || '#000000',
       bgTransparent: raceTimerState.bgTransparent || false,
+    },
+    chat: {
+      channel: chatState.channel || '',
     }
   };
 }
@@ -1520,6 +1551,12 @@ function loadConfig() {
       connectRaceTimer();
     }
     updateTimerStyle();
+  }
+
+  // Restore chat channel (don't auto-connect for safety)
+  if (config.chat && config.chat.channel) {
+    const el = document.getElementById('chat-channel');
+    if (el) el.value = config.chat.channel;
   }
 
   renderAll();
@@ -1660,6 +1697,247 @@ document.getElementById('canvas').addEventListener('mousedown', e => {
     }
   });
 })();
+
+// ============================================================
+// TWITCH CHAT COMMANDS
+// ============================================================
+let chatState = {
+  socket: null,
+  channel: '',
+  connected: false,
+};
+
+function connectChat() {
+  let channel = document.getElementById('chat-channel').value.trim().toLowerCase();
+  if (!channel) return;
+  channel = channel.replace(/^#/, '');
+
+  disconnectChat();
+
+  const statusEl = document.getElementById('chat-status');
+  statusEl.textContent = 'Connecting...';
+  statusEl.style.color = '#ff0';
+
+  const ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
+  chatState.socket = ws;
+  chatState.channel = channel;
+
+  ws.onopen = () => {
+    // Anonymous login — justinfan<random>
+    const nick = 'justinfan' + Math.floor(Math.random() * 100000);
+    ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands');
+    ws.send('PASS SCHMOOPIIE');
+    ws.send('NICK ' + nick);
+    ws.send('JOIN #' + channel);
+    statusEl.textContent = 'Connected to #' + channel;
+    statusEl.style.color = '#0f0';
+    chatState.connected = true;
+    saveConfig();
+  };
+
+  ws.onmessage = (e) => {
+    const lines = e.data.split('\r\n');
+    for (const line of lines) {
+      if (!line) continue;
+      // Respond to PING to stay connected
+      if (line.startsWith('PING')) {
+        ws.send('PONG :tmi.twitch.tv');
+        continue;
+      }
+      if (line.includes('PRIVMSG')) {
+        handleIRCMessage(line);
+      }
+    }
+  };
+
+  ws.onerror = () => {
+    statusEl.textContent = 'Connection error';
+    statusEl.style.color = '#f44';
+  };
+
+  ws.onclose = () => {
+    if (chatState.connected) {
+      statusEl.textContent = 'Disconnected';
+      statusEl.style.color = '#888';
+    }
+    chatState.connected = false;
+  };
+}
+
+function disconnectChat() {
+  if (chatState.socket) {
+    try { chatState.socket.close(); } catch (e) {}
+  }
+  chatState.socket = null;
+  chatState.connected = false;
+  const statusEl = document.getElementById('chat-status');
+  if (statusEl) {
+    statusEl.textContent = 'Not connected';
+    statusEl.style.color = '#666';
+  }
+}
+
+function toggleCommandHelp() {
+  const el = document.getElementById('command-help');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function handleIRCMessage(raw) {
+  // Parse IRC line with tags: @tags :user!user@user.tmi.twitch.tv PRIVMSG #chan :message
+  const tagMatch = raw.match(/^@([^ ]+) /);
+  const tags = {};
+  if (tagMatch) {
+    tagMatch[1].split(';').forEach(t => {
+      const [k, v] = t.split('=');
+      tags[k] = v || '';
+    });
+  }
+
+  const userMatch = raw.match(/:([^!]+)!/);
+  const username = userMatch ? userMatch[1] : '';
+
+  const msgMatch = raw.match(/PRIVMSG #[^ ]+ :(.+)$/);
+  if (!msgMatch) return;
+  const message = msgMatch[1].trim();
+
+  if (!message.startsWith('!')) return;
+
+  // Permission check — broadcaster or mod only
+  const isBroadcaster = (tags.badges || '').includes('broadcaster/');
+  const isMod = tags.mod === '1' || (tags.badges || '').includes('moderator/');
+  if (!isBroadcaster && !isMod) return;
+
+  handleCommand(username, message);
+}
+
+function handleCommand(user, msg) {
+  const parts = msg.slice(1).split(/\s+/);
+  const cmd = parts[0].toLowerCase();
+  const args = parts.slice(1);
+
+  switch (cmd) {
+    case 'audio': {
+      const ch = (args[0] || '').toLowerCase().replace(/^@/, '');
+      const panel = panels.find(p => (p.channel || '').toLowerCase() === ch);
+      if (panel) {
+        toggleAudio(panel.id);
+        showToast(`[${user}] Audio: ${ch}`);
+      }
+      break;
+    }
+    case 'mute': {
+      if (audioActiveId) toggleAudio(audioActiveId);
+      showToast(`[${user}] Muted all`);
+      break;
+    }
+    case 'sync':
+    case 'reload': {
+      // Reload all stream iframes by re-initing players
+      for (const [id, entry] of panelElements) {
+        if (entry.player && entry.player.setChannel) {
+          const p = panels.find(p => p.id === id);
+          if (p) entry.player.setChannel(p.channel);
+        }
+      }
+      showToast(`[${user}] Synced all streams`);
+      break;
+    }
+    case 'layout': {
+      const m = (args[0] || '').match(/^(\d+)x(\d+)$/);
+      if (m) {
+        applyPreset(parseInt(m[1]), parseInt(m[2]));
+        showToast(`[${user}] Layout: ${args[0]}`);
+      }
+      break;
+    }
+    case 'add': {
+      const ch = (args[0] || '').toLowerCase().replace(/^@/, '');
+      if (!ch) break;
+      const id = 'p' + Date.now();
+      panels.push({
+        id, type: 'stream', channel: ch,
+        x: 100, y: 100, w: 400, h: 225,
+        zoom: 1, panX: 0, panY: 0,
+      });
+      renderAll();
+      saveConfig();
+      showToast(`[${user}] Added: ${ch}`);
+      break;
+    }
+    case 'remove': {
+      const ch = (args[0] || '').toLowerCase().replace(/^@/, '');
+      panels = panels.filter(p => (p.channel || '').toLowerCase() !== ch);
+      renderAll();
+      saveConfig();
+      showToast(`[${user}] Removed: ${ch}`);
+      break;
+    }
+    case 'change':
+    case 'swap':
+    case 'set': {
+      // !change <old> <new>  OR  !set <slot#> <new>
+      const first = (args[0] || '').toLowerCase().replace(/^@/, '');
+      const newCh = (args[1] || '').toLowerCase().replace(/^@/, '');
+      if (!first || !newCh) break;
+
+      let panel = null;
+      if (/^\d+$/.test(first)) {
+        // By slot number (1-indexed)
+        const idx = parseInt(first) - 1;
+        panel = panels[idx];
+      } else {
+        // By current channel name
+        panel = panels.find(p => (p.channel || '').toLowerCase() === first);
+      }
+      if (panel) {
+        const oldCh = panel.channel;
+        panel.channel = newCh;
+        updateAllPanelDOM();
+        renderPanelList();
+        saveConfig();
+        showToast(`[${user}] ${oldCh} → ${newCh}`);
+      }
+      break;
+    }
+    case 'zoom': {
+      const ch = (args[0] || '').toLowerCase().replace(/^@/, '');
+      const level = Math.max(1, Math.min(8, parseFloat(args[1]) || 1));
+      const panel = panels.find(p => (p.channel || '').toLowerCase() === ch);
+      if (panel) {
+        panel.zoom = level;
+        clampPan(panel);
+        updateAllPanelDOM();
+        saveConfig();
+        showToast(`[${user}] Zoom ${ch}: ${level}x`);
+      }
+      break;
+    }
+    case 'pan': {
+      const ch = (args[0] || '').toLowerCase().replace(/^@/, '');
+      const xPct = parseFloat(args[1]) / 100;
+      const yPct = parseFloat(args[2]) / 100;
+      const panel = panels.find(p => (p.channel || '').toLowerCase() === ch);
+      if (panel && !isNaN(xPct) && !isNaN(yPct)) {
+        panel.panX = Math.round(-xPct * panel.w * (panel.zoom - 1));
+        panel.panY = Math.round(-yPct * panel.h * (panel.zoom - 1));
+        clampPan(panel);
+        updateAllPanelDOM();
+        saveConfig();
+        showToast(`[${user}] Pan ${ch}`);
+      }
+      break;
+    }
+    case 'timer': {
+      const room = args[0] || '';
+      if (room) {
+        document.getElementById('racetime-url').value = room;
+        connectRaceTimer();
+        showToast(`[${user}] Timer: ${room}`);
+      }
+      break;
+    }
+  }
+}
 
 // ============================================================
 // RACETIME.GG TIMER
