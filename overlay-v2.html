@@ -619,6 +619,7 @@
   <div class="sidebar-section">
     <h3>Config</h3>
     <button class="btn" style="width:100%; margin-bottom:6px;" onclick="exportURL()">Export as URL</button>
+    <button class="btn" style="width:100%; margin-bottom:6px;" onclick="exportShortURL()">Export as Short URL (for chat)</button>
     <button class="btn" style="width:100%; margin-bottom:6px;" onclick="copyConfig()">Copy Config JSON</button>
     <button class="btn btn-danger" style="width:100%;" onclick="clearConfig()">Reset All</button>
   </div>
@@ -1647,6 +1648,30 @@ function exportURL() {
   }).catch(() => {
     prompt('Copy this URL:', url);
   });
+}
+
+function exportShortURL() {
+  const config = getConfig();
+  const encoded = btoa(JSON.stringify(config));
+  const url = window.location.origin + window.location.pathname + '#' + encoded;
+
+  showToast('Shortening URL...');
+
+  // TinyURL API — no auth required, GETs to /api-create.php with url param
+  fetch('https://tinyurl.com/api-create.php?url=' + encodeURIComponent(url))
+    .then(r => r.text())
+    .then(shortUrl => {
+      if (!shortUrl.startsWith('http')) throw new Error('Bad response');
+      navigator.clipboard.writeText(shortUrl).then(() => {
+        showToast('Short URL copied! (' + shortUrl.length + ' chars)');
+      }).catch(() => {
+        prompt('Copy this short URL:', shortUrl);
+      });
+    })
+    .catch(() => {
+      showToast('Shortener failed — try pasting full URL to tinyurl.com');
+      prompt('Copy this URL and shorten manually at tinyurl.com:', url);
+    });
 }
 
 function copyConfig() {
