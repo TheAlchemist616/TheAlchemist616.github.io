@@ -122,6 +122,19 @@
     left: 0;
     transform-origin: 0 0;
   }
+  .text-content {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    word-break: break-word;
+    line-height: 1.2;
+    text-align: center;
+  }
+  /* Text panels don't need dark background */
+  .panel.text-panel { background: transparent; }
 
   /* Edit mode panel overlay — captures mouse events for move in edit mode */
   .panel-overlay {
@@ -497,6 +510,7 @@
     <div class="preset-grid" id="preset-buttons"></div>
     <button class="btn btn-primary" style="width:100%; margin-top:6px;" onclick="addPanel()">+ Add Stream</button>
     <button class="btn" style="width:100%; margin-top:4px;" onclick="addURLPanel()">+ Add URL Panel</button>
+    <button class="btn" style="width:100%; margin-top:4px;" onclick="addTextPanel()">+ Add Text Box</button>
   </div>
 
   <div class="sidebar-section">
@@ -519,7 +533,9 @@
       <code>!add &lt;channel&gt;</code> — add stream<br>
       <code>!remove &lt;channel&gt;</code> — remove stream<br>
       <code>!change &lt;old&gt; &lt;new&gt;</code> — swap streamer<br>
-      <code>!set &lt;slot#&gt; &lt;new&gt;</code> — swap by slot<br>
+      <code>!set &lt;slot#&gt; &lt;new&gt;</code> — set slot (stream/url/text)<br>
+      <code>!text &lt;text&gt;</code> — add text box<br>
+      <code>!settext &lt;slot#&gt; &lt;text&gt;</code> — update text<br>
       <code>!zoom &lt;channel&gt; &lt;1-8&gt;</code><br>
       <code>!pan &lt;channel&gt; &lt;x%&gt; &lt;y%&gt;</code><br>
       <code>!timer &lt;category/room&gt;</code> — racetime<br>
@@ -606,6 +622,46 @@
     <div class="sidebar-row" id="det-url-row" style="display:none;">
       <label>URL</label>
       <input type="text" id="det-url" placeholder="https://..." oninput="updateSelectedURL(this.value)">
+    </div>
+    <div id="det-text-section" style="display:none;">
+      <div class="sidebar-row">
+        <label>Text</label>
+        <input type="text" id="det-text" placeholder="your text here" oninput="updateSelectedText('text', this.value)">
+      </div>
+      <div class="sidebar-row">
+        <label>Font</label>
+        <select id="det-text-font" onchange="updateSelectedText('textFont', this.value)">
+          <option value="'Arial Black', sans-serif">Arial Black</option>
+          <option value="Impact, sans-serif">Impact</option>
+          <option value="'Courier New', monospace">Courier New</option>
+          <option value="'Roboto Mono', monospace">Roboto Mono</option>
+          <option value="'Orbitron', sans-serif">Orbitron</option>
+          <option value="'Press Start 2P', monospace">Press Start 2P</option>
+          <option value="'Trebuchet MS', sans-serif">Trebuchet MS</option>
+          <option value="Arial, sans-serif">Arial</option>
+          <option value="Georgia, serif">Georgia</option>
+        </select>
+      </div>
+      <div class="sidebar-row">
+        <label>Size</label>
+        <input type="range" id="det-text-size" min="10" max="200" value="36" oninput="updateSelectedText('textSize', parseInt(this.value))">
+        <span id="det-text-size-val" style="min-width:35px;text-align:right;">36px</span>
+      </div>
+      <div class="sidebar-row">
+        <label>Color</label>
+        <input type="color" id="det-text-color" value="#ffffff" oninput="updateSelectedText('textColor', this.value)" style="width:40px;height:28px;padding:0;border:none;cursor:pointer;">
+        <label>BG</label>
+        <input type="color" id="det-text-bg" value="#000000" oninput="updateSelectedText('textBg', this.value)" style="width:40px;height:28px;padding:0;border:none;cursor:pointer;">
+        <label style="min-width:auto;"><input type="checkbox" id="det-text-bg-trans" onchange="updateSelectedText('textBgTransparent', this.checked)"> None</label>
+      </div>
+      <div class="sidebar-row">
+        <label>Align</label>
+        <select id="det-text-align" onchange="updateSelectedText('textAlign', this.value)">
+          <option value="center">Center</option>
+          <option value="left">Left</option>
+          <option value="right">Right</option>
+        </select>
+      </div>
     </div>
     <div class="sidebar-row">
       <label>X</label>
@@ -783,7 +839,16 @@ function syncCanvasDOM() {
 
   // Init players AFTER elements are in the DOM
   newEntries.forEach(({ entry, panel }) => {
-    if (panel.type === 'url') {
+    if (panel.type === 'text') {
+      // Text panel — span containing text
+      const target = document.getElementById('tp-' + panel.id);
+      if (target) {
+        const textEl = document.createElement('div');
+        textEl.className = 'text-content';
+        target.appendChild(textEl);
+        entry.textEl = textEl;
+      }
+    } else if (panel.type === 'url') {
       // URL panel — raw iframe
       const iframe = document.createElement('iframe');
       iframe.src = panel.url || '';
@@ -897,7 +962,8 @@ function updateAllPanelDOM() {
     el.className = 'panel'
       + (p.id === selectedId ? ' selected' : '')
       + (p.id === cropModeId ? ' crop-mode' : '')
-      + (p.layer ? ' layer-' + p.layer : '');
+      + (p.layer ? ' layer-' + p.layer : '')
+      + (p.type === 'text' ? ' text-panel' : '');
 
     // Position and size
     el.style.left = p.x + 'px';
@@ -924,6 +990,16 @@ function updateAllPanelDOM() {
       }
     }
 
+    // Text panel — apply text, font, size, color
+    if (entry.textEl) {
+      entry.textEl.textContent = p.text || '';
+      entry.textEl.style.fontFamily = p.textFont || "'Arial Black', sans-serif";
+      entry.textEl.style.fontSize = (p.textSize || 36) + 'px';
+      entry.textEl.style.color = p.textColor || '#ffffff';
+      entry.textEl.style.textAlign = p.textAlign || 'center';
+      entry.textEl.style.background = p.textBgTransparent ? 'transparent' : (p.textBg || '#000000');
+    }
+
     // Stream panel — resize the player iframe if it exists
     if (entry.player && entry.player.getIframe) {
       const iframe = entry.player.getIframe();
@@ -941,14 +1017,18 @@ function updateAllPanelDOM() {
       entry.channelLoaded = p.channel;
     }
 
-    // Hide audio button on URL panels
+    // Hide audio button on URL and text panels
     if (entry.audioBtn) {
-      entry.audioBtn.style.display = (p.type === 'url') ? 'none' : '';
+      entry.audioBtn.style.display = (p.type === 'url' || p.type === 'text') ? 'none' : '';
     }
 
     // Label
     const label = el.querySelector('.panel-label');
-    const labelText = p.type === 'url' ? ('URL: ' + (p.url || '').substring(0, 30)) : p.channel;
+    const labelText = p.type === 'url'
+      ? ('URL: ' + (p.url || '').substring(0, 30))
+      : p.type === 'text'
+        ? ('Text: ' + (p.text || '').substring(0, 30))
+        : p.channel;
     if (label) label.textContent = labelText + (p.id === cropModeId ? ' [CROP]' : '');
 
     // Zoom badge
@@ -975,11 +1055,12 @@ function renderPanelList() {
 
     const inp = document.createElement('input');
     inp.type = 'text';
-    inp.value = p.type === 'url' ? (p.url || '') : p.channel;
-    inp.placeholder = p.type === 'url' ? 'https://...' : 'channel_name';
+    inp.value = p.type === 'url' ? (p.url || '') : p.type === 'text' ? (p.text || '') : p.channel;
+    inp.placeholder = p.type === 'url' ? 'https://...' : p.type === 'text' ? 'text' : 'channel_name';
     inp.onclick = e => e.stopPropagation();
     inp.oninput = () => {
       if (p.type === 'url') { p.url = inp.value; }
+      else if (p.type === 'text') { p.text = inp.value; }
       else { p.channel = inp.value; }
       updateAllPanelDOM();
       saveConfig();
@@ -1002,12 +1083,24 @@ function renderPanelDetail() {
   detail.classList.add('visible');
 
   const isURL = p.type === 'url';
-  document.getElementById('det-title').textContent = isURL ? 'Selected URL Panel' : 'Selected Stream';
-  document.getElementById('det-channel-row').style.display = isURL ? 'none' : '';
+  const isText = p.type === 'text';
+  const titleMap = { url: 'Selected URL Panel', text: 'Selected Text Box', stream: 'Selected Stream' };
+  document.getElementById('det-title').textContent = titleMap[p.type] || 'Selected Stream';
+  document.getElementById('det-channel-row').style.display = (isURL || isText) ? 'none' : '';
   document.getElementById('det-url-row').style.display = isURL ? '' : 'none';
+  document.getElementById('det-text-section').style.display = isText ? '' : 'none';
 
   if (isURL) {
     document.getElementById('det-url').value = p.url || '';
+  } else if (isText) {
+    document.getElementById('det-text').value = p.text || '';
+    document.getElementById('det-text-font').value = p.textFont || "'Arial Black', sans-serif";
+    document.getElementById('det-text-size').value = p.textSize || 36;
+    document.getElementById('det-text-size-val').textContent = (p.textSize || 36) + 'px';
+    document.getElementById('det-text-color').value = p.textColor || '#ffffff';
+    document.getElementById('det-text-bg').value = p.textBg || '#000000';
+    document.getElementById('det-text-bg-trans').checked = !!p.textBgTransparent;
+    document.getElementById('det-text-align').value = p.textAlign || 'center';
   } else {
     document.getElementById('det-channel').value = p.channel;
   }
@@ -1335,6 +1428,18 @@ function redistributeGrid() {
   saveConfig();
 }
 
+function updateSelectedText(field, val) {
+  const p = panels.find(p => p.id === selectedId);
+  if (!p) return;
+  p[field] = val;
+  if (field === 'textSize') {
+    const lbl = document.getElementById('det-text-size-val');
+    if (lbl) lbl.textContent = val + 'px';
+  }
+  updateAllPanelDOM();
+  saveConfig();
+}
+
 function updateSelectedURL(val) {
   const p = panels.find(p => p.id === selectedId);
   if (!p) return;
@@ -1486,6 +1591,32 @@ function addPanel() {
   saveConfig();
 }
 
+function addTextPanel() {
+  const text = prompt('Enter text:');
+  if (!text) return;
+  const id = 't' + Date.now();
+  panels.push({
+    id,
+    type: 'text',
+    text: text,
+    channel: '',
+    x: 200 + panels.length * 20,
+    y: 200 + panels.length * 20,
+    w: 400,
+    h: 80,
+    zoom: 1, panX: 0, panY: 0,
+    textFont: "'Arial Black', sans-serif",
+    textSize: 36,
+    textColor: '#ffffff',
+    textBg: '#000000',
+    textBgTransparent: false,
+    textAlign: 'center',
+  });
+  selectedId = id;
+  renderAll();
+  saveConfig();
+}
+
 function addURLPanel() {
   const url = prompt('Enter URL (e.g. racetime.gg timer, chat widget):');
   if (!url) return;
@@ -1524,6 +1655,13 @@ function getConfig() {
       type: p.type || 'stream',
       channel: p.channel,
       url: p.url || '',
+      text: p.text || '',
+      textFont: p.textFont || null,
+      textSize: p.textSize || null,
+      textColor: p.textColor || null,
+      textBg: p.textBg || null,
+      textBgTransparent: p.textBgTransparent || false,
+      textAlign: p.textAlign || null,
       x: Math.round(p.x),
       y: Math.round(p.y),
       w: Math.round(p.w),
@@ -1578,10 +1716,17 @@ function loadConfig() {
 
   if (config && config.panels && config.panels.length > 0) {
     panels = config.panels.map((p, i) => ({
-      id: (p.type === 'url' ? 'u' : 'p') + Date.now() + '_' + i,
+      id: (p.type === 'url' ? 'u' : p.type === 'text' ? 't' : 'p') + Date.now() + '_' + i,
       type: p.type || 'stream',
       channel: p.channel || `channel${i + 1}`,
       url: p.url || '',
+      text: p.text || '',
+      textFont: p.textFont || "'Arial Black', sans-serif",
+      textSize: p.textSize || 36,
+      textColor: p.textColor || '#ffffff',
+      textBg: p.textBg || '#000000',
+      textBgTransparent: p.textBgTransparent || false,
+      textAlign: p.textAlign || 'center',
       x: p.x || 0,
       y: p.y || 0,
       w: p.w || 400,
@@ -2015,27 +2160,70 @@ function handleCommand(user, msg) {
     case 'change':
     case 'swap':
     case 'set': {
-      // !change <old> <new>  OR  !set <slot#> <new>
+      // !change <old> <new>  OR  !set <slot#> <new...>
       const first = (args[0] || '').toLowerCase().replace(/^@/, '');
-      const newCh = (args[1] || '').toLowerCase().replace(/^@/, '');
-      if (!first || !newCh) break;
+      const rest = args.slice(1).join(' ');
+      if (!first || !rest) break;
 
       let panel = null;
       if (/^\d+$/.test(first)) {
-        // By slot number (1-indexed)
         const idx = parseInt(first) - 1;
         panel = panels[idx];
       } else {
-        // By current channel name
         panel = panels.find(p => (p.channel || '').toLowerCase() === first);
       }
       if (panel) {
-        const oldCh = panel.channel;
-        panel.channel = newCh;
+        if (panel.type === 'text') {
+          panel.text = rest;
+          showToast(`[${user}] Text updated`);
+        } else if (panel.type === 'url') {
+          panel.url = rest;
+          showToast(`[${user}] URL updated`);
+        } else {
+          const oldCh = panel.channel;
+          panel.channel = rest.replace(/^@/, '').split(/\s+/)[0];
+          showToast(`[${user}] ${oldCh} → ${panel.channel}`);
+        }
         updateAllPanelDOM();
         renderPanelList();
         saveConfig();
-        showToast(`[${user}] ${oldCh} → ${newCh}`);
+      }
+      break;
+    }
+    case 'addtext':
+    case 'text': {
+      const text = args.join(' ');
+      if (!text) break;
+      const id = 't' + Date.now();
+      panels.push({
+        id, type: 'text', text: text,
+        channel: '',
+        x: 200, y: 200, w: 400, h: 80,
+        zoom: 1, panX: 0, panY: 0,
+        textFont: "'Arial Black', sans-serif",
+        textSize: 36,
+        textColor: '#ffffff',
+        textBg: '#000000',
+        textBgTransparent: false,
+        textAlign: 'center',
+      });
+      renderAll();
+      saveConfig();
+      showToast(`[${user}] Text added`);
+      break;
+    }
+    case 'settext': {
+      // !settext <slot#> <new text>
+      const slot = parseInt(args[0]);
+      const newText = args.slice(1).join(' ');
+      if (!slot || !newText) break;
+      const panel = panels[slot - 1];
+      if (panel && panel.type === 'text') {
+        panel.text = newText;
+        updateAllPanelDOM();
+        renderPanelList();
+        saveConfig();
+        showToast(`[${user}] Text updated`);
       }
       break;
     }
