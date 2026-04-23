@@ -1703,11 +1703,18 @@ function saveConfig() {
 }
 
 function loadConfig() {
-  // Priority: URL hash > localStorage > default
+  // Priority: ?c= query > URL hash > localStorage > default
+  const cParam = new URLSearchParams(window.location.search).get('c');
   const hash = window.location.hash.slice(1);
   let config = null;
 
-  if (hash) {
+  if (cParam) {
+    try {
+      config = JSON.parse(atob(cParam));
+    } catch (e) {}
+  }
+
+  if (!config && hash) {
     try {
       config = JSON.parse(atob(hash));
     } catch (e) {}
@@ -1880,7 +1887,8 @@ function exportURL() {
 function exportShortURL() {
   const config = getConfig();
   const encoded = btoa(JSON.stringify(config));
-  const url = window.location.origin + window.location.pathname + '#' + encoded;
+  // Use ?c= query param (survives redirects) instead of #hash (lost in redirects)
+  const url = window.location.origin + window.location.pathname + '?c=' + encoded;
 
   showToast('Shortening URL...');
 
@@ -2292,18 +2300,42 @@ function handleCommand(user, msg) {
 }
 
 function applyConfigFromString(input, user) {
-  // Support: full exported URL, raw base64 hash, or JSON URL
+  // Support: exported URL (hash or ?c=), shortened URL (tinyurl etc), JSON URL, or raw base64
   let hash = input;
+
+  // Check for ?c= query param in the URL directly
   if (input.startsWith('http')) {
-    // If it's an exported overlay URL with hash
+    try {
+      const u = new URL(input);
+      const cParam = u.searchParams.get('c');
+      if (cParam) {
+        const config = JSON.parse(atob(cParam));
+        applyConfig(config, user);
+        return;
+      }
+    } catch (e) {}
+
     if (input.includes('#')) {
       hash = input.split('#')[1];
     } else {
-      // Treat as URL that returns JSON
+      // Fetch — might be shortener redirect or JSON URL
       fetch(input)
-        .then(r => r.json())
-        .then(config => applyConfig(config, user))
-        .catch(() => showToast(`[${user}] Config fetch failed`));
+        .then(r => {
+          // After redirect, check final URL for ?c= param
+          try {
+            const finalURL = new URL(r.url);
+            const cParam = finalURL.searchParams.get('c');
+            if (cParam) {
+              const config = JSON.parse(atob(cParam));
+              applyConfig(config, user);
+              return null;
+            }
+          } catch (e) {}
+          // Otherwise treat as JSON
+          return r.json();
+        })
+        .then(config => { if (config) applyConfig(config, user); })
+        .catch(() => showToast(`[${user}] Config fetch failed — use a newly-exported Short URL`));
       return;
     }
   }
