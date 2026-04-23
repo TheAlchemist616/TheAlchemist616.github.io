@@ -463,11 +463,17 @@
     <h3>Frame Overlay</h3>
     <input type="file" id="frame-upload" accept="image/*" style="display:none;" onchange="loadFrameImage(this)">
     <button class="btn" style="width:100%; margin-bottom:6px;" onclick="document.getElementById('frame-upload').click()">Upload Frame Image</button>
-    <div class="sidebar-row" id="frame-controls" style="display:none;">
+    <div class="sidebar-row">
+      <input type="text" id="frame-url" placeholder="or paste image URL...">
+    </div>
+    <div class="sidebar-row" style="gap:4px;">
+      <button class="btn btn-sm btn-primary" onclick="loadFrameFromURL()">Load URL</button>
+    </div>
+    <div class="sidebar-row" id="frame-controls" style="display:none; margin-top:6px;">
       <button class="btn btn-sm" onclick="toggleFrameOpacity()">Opacity: <span id="frame-opacity-label">50%</span></button>
       <button class="btn btn-sm btn-danger" onclick="removeFrameImage()">Remove</button>
     </div>
-    <p style="font-size:11px; color:#666;">Upload your OBS frame PNG to align streams with the cutouts. Only visible in edit mode.</p>
+    <p style="font-size:11px; color:#666;">Upload a file or paste an image URL to show your OBS frame over the canvas.</p>
   </div>
 
   <div class="sidebar-section">
@@ -501,6 +507,9 @@
       <code>!zoom &lt;channel&gt; &lt;1-8&gt;</code><br>
       <code>!pan &lt;channel&gt; &lt;x%&gt; &lt;y%&gt;</code><br>
       <code>!timer &lt;category/room&gt;</code> — racetime<br>
+      <code>!frame &lt;url&gt;</code> — load frame image<br>
+      <code>!frame off</code> — remove frame<br>
+      <code>!config &lt;url/hash&gt;</code> — load full config<br>
       <code>!reload</code> — reload overlay
     </div>
   </div>
@@ -1474,7 +1483,8 @@ function getConfig() {
     },
     chat: {
       channel: chatState.channel || '',
-    }
+    },
+    frameURL: frameURL || '',
   };
 }
 
@@ -1559,6 +1569,11 @@ function loadConfig() {
     if (el) el.value = config.chat.channel;
   }
 
+  // Restore frame from URL
+  if (config.frameURL) {
+    loadFrameFromURL(config.frameURL);
+  }
+
   renderAll();
 }
 
@@ -1567,6 +1582,7 @@ function loadConfig() {
 // FRAME OVERLAY IMAGE
 // ============================================================
 let frameOpacity = 0.5;
+let frameURL = '';
 
 function loadFrameImage(input) {
   const file = input.files[0];
@@ -1577,9 +1593,29 @@ function loadFrameImage(input) {
     img.src = e.target.result;
     img.classList.add('loaded');
     document.getElementById('frame-controls').style.display = 'flex';
+    frameURL = ''; // clear URL since this is a file
     showToast('Frame loaded — align your streams underneath');
+    saveConfig();
   };
   reader.readAsDataURL(file);
+}
+
+function loadFrameFromURL(url) {
+  const src = url || document.getElementById('frame-url').value.trim();
+  if (!src) return;
+  const img = document.getElementById('frame-image');
+  img.onerror = () => {
+    showToast('Failed to load image — check URL/CORS');
+    img.onerror = null;
+  };
+  img.onload = () => { img.onerror = null; };
+  img.src = src;
+  img.classList.add('loaded');
+  document.getElementById('frame-controls').style.display = 'flex';
+  document.getElementById('frame-url').value = src;
+  frameURL = src;
+  saveConfig();
+  showToast('Frame loaded from URL');
 }
 
 function toggleFrameOpacity() {
@@ -1596,6 +1632,9 @@ function removeFrameImage() {
   img.classList.remove('loaded');
   document.getElementById('frame-controls').style.display = 'none';
   document.getElementById('frame-upload').value = '';
+  document.getElementById('frame-url').value = '';
+  frameURL = '';
+  saveConfig();
 }
 
 function exportURL() {
@@ -1936,7 +1975,89 @@ function handleCommand(user, msg) {
       }
       break;
     }
+    case 'frame': {
+      const url = args[0] || '';
+      if (url.toLowerCase() === 'remove' || url.toLowerCase() === 'clear' || url.toLowerCase() === 'off') {
+        removeFrameImage();
+        showToast(`[${user}] Frame removed`);
+      } else if (url) {
+        loadFrameFromURL(url);
+        showToast(`[${user}] Frame loaded`);
+      }
+      break;
+    }
+    case 'config':
+    case 'loadconfig': {
+      const arg = args[0] || '';
+      if (!arg) break;
+      applyConfigFromString(arg, user);
+      break;
+    }
   }
+}
+
+function applyConfigFromString(input, user) {
+  // Support: full exported URL, raw base64 hash, or JSON URL
+  let hash = input;
+  if (input.startsWith('http')) {
+    // If it's an exported overlay URL with hash
+    if (input.includes('#')) {
+      hash = input.split('#')[1];
+    } else {
+      // Treat as URL that returns JSON
+      fetch(input)
+        .then(r => r.json())
+        .then(config => applyConfig(config, user))
+        .catch(() => showToast(`[${user}] Config fetch failed`));
+      return;
+    }
+  }
+  try {
+    const config = JSON.parse(atob(hash));
+    applyConfig(config, user);
+  } catch (e) {
+    showToast(`[${user}] Invalid config`);
+  }
+}
+
+function applyConfig(config, user) {
+  if (!config || !config.panels) { showToast(`[${user}] Bad config`); return; }
+
+  // Clean up existing panels & players
+  for (const [id, entry] of panelElements) {
+    entry.el.remove();
+  }
+  panelElements.clear();
+
+  // Load panels from config
+  panels = config.panels.map((p, i) => ({
+    id: (p.type === 'url' ? 'u' : 'p') + Date.now() + '_' + i,
+    type: p.type || 'stream',
+    channel: p.channel || `channel${i + 1}`,
+    url: p.url || '',
+    x: p.x || 0, y: p.y || 0,
+    w: p.w || 400, h: p.h || 225,
+    zoom: p.zoom || 1,
+    panX: p.panX || 0, panY: p.panY || 0,
+  }));
+
+  // Restore timer
+  if (config.timer) {
+    if (config.timer.room) {
+      document.getElementById('racetime-url').value = config.timer.room;
+      connectRaceTimer();
+    }
+    raceTimerState.x = config.timer.x || 760;
+    raceTimerState.y = config.timer.y || 520;
+  }
+
+  // Restore frame URL
+  if (config.frameURL) loadFrameFromURL(config.frameURL);
+  else if (!config.frameURL) removeFrameImage();
+
+  renderAll();
+  saveConfig();
+  showToast(`[${user}] Config applied`);
 }
 
 // ============================================================
