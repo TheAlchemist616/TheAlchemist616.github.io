@@ -67,6 +67,15 @@
     object-fit: contain;
   }
   #frame-image.loaded { display: block; }
+  /* Behind streams in edit mode so you can see panels on top of frame */
+  body.edit-mode #frame-image { z-index: 1; }
+  /* Manual layer overrides */
+  #frame-image.layer-front { z-index: 999 !important; }
+  #frame-image.layer-back { z-index: 0 !important; }
+  .panel.layer-front { z-index: 900; }
+  .panel.layer-back { z-index: 10; }
+  #race-timer.layer-front { z-index: 999; }
+  #race-timer.layer-back { z-index: 1; }
 
   /* Corner markers */
   #canvas::before, #canvas::after {
@@ -473,6 +482,12 @@
       <button class="btn btn-sm" onclick="toggleFrameOpacity()">Opacity: <span id="frame-opacity-label">50%</span></button>
       <button class="btn btn-sm btn-danger" onclick="removeFrameImage()">Remove</button>
     </div>
+    <div class="sidebar-row" id="frame-layer-controls" style="display:none;">
+      <label style="min-width:40px;">Layer</label>
+      <button class="btn btn-sm" onclick="setFrameLayer('front')">Front</button>
+      <button class="btn btn-sm" onclick="setFrameLayer('normal')">Default</button>
+      <button class="btn btn-sm" onclick="setFrameLayer('back')">Back</button>
+    </div>
     <p style="font-size:11px; color:#666;">Upload a file or paste an image URL to show your OBS frame over the canvas.</p>
   </div>
 
@@ -550,6 +565,12 @@
         <input type="checkbox" id="timer-bg-transparent" onchange="updateTimerStyle()"> None
       </label>
     </div>
+    <div class="sidebar-row" style="margin-top:4px;">
+      <label style="min-width:40px;">Layer</label>
+      <button class="btn btn-sm" onclick="setTimerLayer('front')">Front</button>
+      <button class="btn btn-sm" onclick="setTimerLayer('normal')">Normal</button>
+      <button class="btn btn-sm" onclick="setTimerLayer('back')">Back</button>
+    </div>
     <div id="racetime-status" style="font-size:11px; color:#666; margin-top:4px;">Not connected</div>
   </div>
 
@@ -613,6 +634,12 @@
     <div class="sidebar-row" style="margin-top:4px;">
       <button class="btn btn-sm btn-primary" id="btn-crop" onclick="toggleCropMode()">Enter Crop Mode</button>
       <span style="font-size:11px; color:#888;">See stream while adjusting zoom/pan</span>
+    </div>
+    <div class="sidebar-row" style="margin-top:4px;">
+      <label style="min-width:40px;">Layer</label>
+      <button class="btn btn-sm" onclick="setPanelLayer('front')">Front</button>
+      <button class="btn btn-sm" onclick="setPanelLayer('normal')">Normal</button>
+      <button class="btn btn-sm" onclick="setPanelLayer('back')">Back</button>
     </div>
   </div>
 
@@ -868,7 +895,8 @@ function updateAllPanelDOM() {
     // Update classes
     el.className = 'panel'
       + (p.id === selectedId ? ' selected' : '')
-      + (p.id === cropModeId ? ' crop-mode' : '');
+      + (p.id === cropModeId ? ' crop-mode' : '')
+      + (p.layer ? ' layer-' + p.layer : '');
 
     // Position and size
     el.style.left = p.x + 'px';
@@ -1379,6 +1407,37 @@ function copyZoomPanToAll() {
   showToast('Zoom/pan copied to all streams');
 }
 
+function setPanelLayer(layer) {
+  const p = panels.find(p => p.id === selectedId);
+  if (!p) return;
+  p.layer = (layer === 'normal') ? null : layer;
+  const entry = panelElements.get(p.id);
+  if (entry && entry.el) {
+    entry.el.classList.remove('layer-front', 'layer-back');
+    if (p.layer) entry.el.classList.add('layer-' + p.layer);
+  }
+  saveConfig();
+  showToast(`Panel layer: ${layer}`);
+}
+
+function setFrameLayer(layer) {
+  const img = document.getElementById('frame-image');
+  img.classList.remove('layer-front', 'layer-back');
+  frameLayer = (layer === 'normal') ? null : layer;
+  if (frameLayer) img.classList.add('layer-' + frameLayer);
+  saveConfig();
+  showToast(`Frame layer: ${layer}`);
+}
+
+function setTimerLayer(layer) {
+  const el = document.getElementById('race-timer');
+  el.classList.remove('layer-front', 'layer-back');
+  raceTimerState.layer = (layer === 'normal') ? null : layer;
+  if (raceTimerState.layer) el.classList.add('layer-' + raceTimerState.layer);
+  saveConfig();
+  showToast(`Timer layer: ${layer}`);
+}
+
 function copyAllToAll() {
   const src = panels.find(p => p.id === selectedId);
   if (!src) return;
@@ -1471,6 +1530,7 @@ function getConfig() {
       zoom: Math.round(p.zoom * 100) / 100,
       panX: Math.round(p.panX),
       panY: Math.round(p.panY),
+      layer: p.layer || null,
     })),
     timer: {
       room: raceTimerState.room || '',
@@ -1486,6 +1546,8 @@ function getConfig() {
       channel: chatState.channel || '',
     },
     frameURL: frameURL || '',
+    frameLayer: frameLayer || null,
+    timerLayer: raceTimerState.layer || null,
   };
 }
 
@@ -1526,6 +1588,7 @@ function loadConfig() {
       zoom: p.zoom || 1,
       panX: p.panX || 0,
       panY: p.panY || 0,
+      layer: p.layer || null,
     }));
   } else {
     // Default: 6-stream 3x2 layout
@@ -1574,6 +1637,12 @@ function loadConfig() {
   if (config.frameURL) {
     loadFrameFromURL(config.frameURL);
   }
+  if (config.frameLayer) {
+    setFrameLayer(config.frameLayer);
+  }
+  if (config.timerLayer) {
+    setTimerLayer(config.timerLayer);
+  }
 
   renderAll();
 }
@@ -1584,6 +1653,7 @@ function loadConfig() {
 // ============================================================
 let frameOpacity = 0.5;
 let frameURL = '';
+let frameLayer = null;
 
 function loadFrameImage(input) {
   const file = input.files[0];
@@ -1594,6 +1664,7 @@ function loadFrameImage(input) {
     img.src = e.target.result;
     img.classList.add('loaded');
     document.getElementById('frame-controls').style.display = 'flex';
+    document.getElementById('frame-layer-controls').style.display = 'flex';
     frameURL = ''; // clear URL since this is a file
     showToast('Frame loaded — align your streams underneath');
     saveConfig();
@@ -1613,6 +1684,7 @@ function loadFrameFromURL(url) {
   img.src = src;
   img.classList.add('loaded');
   document.getElementById('frame-controls').style.display = 'flex';
+  document.getElementById('frame-layer-controls').style.display = 'flex';
   document.getElementById('frame-url').value = src;
   frameURL = src;
   saveConfig();
@@ -1632,9 +1704,12 @@ function removeFrameImage() {
   img.src = '';
   img.classList.remove('loaded');
   document.getElementById('frame-controls').style.display = 'none';
+  document.getElementById('frame-layer-controls').style.display = 'none';
   document.getElementById('frame-upload').value = '';
   document.getElementById('frame-url').value = '';
   frameURL = '';
+  frameLayer = null;
+  img.classList.remove('layer-front', 'layer-back');
   saveConfig();
 }
 
