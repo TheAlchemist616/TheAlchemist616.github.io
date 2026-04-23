@@ -61,13 +61,13 @@
     top: 0; left: 0;
     width: 1920px;
     height: 1080px;
-    z-index: 500;
+    z-index: 50;
     pointer-events: none;
     opacity: 1;
     object-fit: contain;
   }
   #frame-image.loaded { display: block; }
-  /* Behind streams in edit mode so you can see panels on top of frame */
+  /* Even further back in edit mode so panels render clearly on top */
   body.edit-mode #frame-image { z-index: 1; }
   /* Manual layer overrides */
   #frame-image.layer-front { z-index: 999 !important; }
