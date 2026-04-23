@@ -2269,6 +2269,15 @@ function init() {
   });
 
   loadConfig();
+
+  // Auto-connect chat if ?chat=channelname in URL
+  const chatParam = new URLSearchParams(window.location.search).get('chat');
+  if (chatParam) {
+    const el = document.getElementById('chat-channel');
+    if (el) el.value = chatParam;
+    // Small delay to let everything else settle
+    setTimeout(() => connectChat(), 500);
+  }
 }
 
 init();
