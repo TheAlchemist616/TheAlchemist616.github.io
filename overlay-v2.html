@@ -2356,16 +2356,24 @@ function applyConfig(config, user) {
   }
   panelElements.clear();
 
-  // Load panels from config
+  // Load panels from config (include text + layer fields)
   panels = config.panels.map((p, i) => ({
-    id: (p.type === 'url' ? 'u' : 'p') + Date.now() + '_' + i,
+    id: (p.type === 'url' ? 'u' : p.type === 'text' ? 't' : 'p') + Date.now() + '_' + i,
     type: p.type || 'stream',
     channel: p.channel || `channel${i + 1}`,
     url: p.url || '',
+    text: p.text || '',
+    textFont: p.textFont || "'Arial Black', sans-serif",
+    textSize: p.textSize || 36,
+    textColor: p.textColor || '#ffffff',
+    textBg: p.textBg || '#000000',
+    textBgTransparent: p.textBgTransparent || false,
+    textAlign: p.textAlign || 'center',
     x: p.x || 0, y: p.y || 0,
     w: p.w || 400, h: p.h || 225,
     zoom: p.zoom || 1,
     panX: p.panX || 0, panY: p.panY || 0,
+    layer: p.layer || null,
   }));
 
   // Restore timer
