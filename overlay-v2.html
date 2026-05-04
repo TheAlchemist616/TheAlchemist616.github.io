@@ -1919,15 +1919,28 @@ function createStreamerLink() {
   statusEl.textContent = 'Creating link...';
   statusEl.style.color = '#ff0';
 
+  // POST without Accept header so response body is the new URL (text)
+  // — Location header isn't exposed to CORS by JSONblob
   fetch(JSONBLOB_API, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
-  }).then(r => {
-    if (!r.ok) throw new Error('Status ' + r.status);
+  }).then(async r => {
+    if (!r.ok) {
+      const errText = await r.text().catch(() => '');
+      throw new Error('Status ' + r.status + (errText ? ' - ' + errText.slice(0, 80) : ''));
+    }
+    // Try Location header first; fallback to response body (which is the URL as text)
+    let id = '';
     const loc = r.headers.get('Location') || '';
-    const id = loc.split('/').pop();
-    if (!id) throw new Error('No ID in response');
+    if (loc) id = loc.split('/').pop();
+    if (!id) {
+      const body = (await r.text()).trim();
+      // Body is the full URL like https://jsonblob.com/api/jsonBlob/abc123
+      const m = body.match(/jsonBlob\/([\w-]+)/);
+      if (m) id = m[1];
+    }
+    if (!id) throw new Error('Could not get blob ID from response');
     streamerBlobID = id;
     document.getElementById('blob-id').value = id;
     saveConfig();
@@ -1937,6 +1950,7 @@ function createStreamerLink() {
   }).catch(e => {
     statusEl.textContent = 'Failed: ' + e.message;
     statusEl.style.color = '#f44';
+    console.error('Streamer link create failed:', e);
   });
 }
 
