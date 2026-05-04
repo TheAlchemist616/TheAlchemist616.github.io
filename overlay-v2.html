@@ -538,14 +538,22 @@
     </div>
     <div id="gh-link-controls" style="display:none;">
       <div class="sidebar-row">
-        <input type="text" id="cloud-url" placeholder="(generated after Create Link)" readonly>
+        <label style="min-width:60px;">Streamer</label>
+        <select id="streamer-select" onchange="onStreamerSelect()" style="flex:1;">
+          <option value="">— select —</option>
+        </select>
       </div>
       <div class="sidebar-row" style="gap:4px; flex-wrap:wrap;">
-        <button class="btn btn-sm btn-primary" onclick="createStreamerLink()">Create Link</button>
+        <button class="btn btn-sm btn-primary" onclick="addNewStreamer()">+ New Streamer</button>
         <button class="btn btn-sm" onclick="pushStreamerUpdate()">Push Update</button>
         <button class="btn btn-sm" onclick="copyStreamerLink()">Copy Streamer URL</button>
+      </div>
+      <div class="sidebar-row" style="gap:4px;">
+        <button class="btn btn-sm" onclick="refreshRegistry()">Refresh List</button>
+        <button class="btn btn-sm btn-danger" onclick="removeCurrentStreamer()">Delete Streamer</button>
         <button class="btn btn-sm btn-danger" onclick="clearGHToken()">Reset Token</button>
       </div>
+      <input type="hidden" id="cloud-url">
     </div>
     <div id="blob-status" style="font-size:11px; color:#666; margin-top:4px;"></div>
   </div>
@@ -1924,30 +1932,43 @@ function exportURL() {
 }
 
 // ============================================================
-// CLOUD CONFIG via GitHub Gist API
+// CLOUD CONFIG via GitHub Gist API + Registry
 // ============================================================
 let cloudURL = '';
-let gistID = '';
 let ghToken = '';
+let registryGistID = '';      // gist that contains the streamers→gist mapping
+let registry = {};             // { streamerName: configGistID }
+let activeStreamer = '';       // currently selected streamer name
 
 const GIST_FILENAME = 'overlay-config.json';
+const REGISTRY_FILENAME = 'streamers.json';
+const REGISTRY_DESC = '[overlay-v2] streamer registry — auto-managed';
 
-function loadGHToken() {
+function ghHeaders() {
+  return {
+    'Accept': 'application/vnd.github+json',
+    'Authorization': 'Bearer ' + ghToken,
+    'Content-Type': 'application/json',
+  };
+}
+
+function setStatus(msg, color) {
+  const el = document.getElementById('blob-status');
+  if (el) { el.textContent = msg; el.style.color = color || '#666'; }
+}
+
+async function loadGHToken() {
   ghToken = localStorage.getItem('overlay-gh-token') || '';
-  gistID = localStorage.getItem('overlay-gist-id') || '';
+  registryGistID = localStorage.getItem('overlay-registry-gist') || '';
+  activeStreamer = localStorage.getItem('overlay-active-streamer') || '';
   if (ghToken) {
     document.getElementById('gh-token-setup').style.display = 'none';
     document.getElementById('gh-link-controls').style.display = 'block';
-    if (gistID) {
-      const url = `https://gist.githubusercontent.com/raw/${gistID}/${GIST_FILENAME}`;
-      const cu = document.getElementById('cloud-url');
-      if (cu) cu.value = url;
-      cloudURL = url;
-    }
+    await initRegistry();
   }
 }
 
-function saveGHToken() {
+async function saveGHToken() {
   const t = (document.getElementById('gh-token').value || '').trim();
   if (!t.startsWith('ghp_') && !t.startsWith('github_pat_')) {
     if (!confirm("That doesn't look like a GitHub token. Save anyway?")) return;
@@ -1957,97 +1978,195 @@ function saveGHToken() {
   document.getElementById('gh-token-setup').style.display = 'none';
   document.getElementById('gh-link-controls').style.display = 'block';
   showToast('Token saved');
+  await initRegistry();
 }
 
 function clearGHToken() {
-  if (!confirm('Remove saved token and gist link?')) return;
+  if (!confirm('Remove saved token & registry reference? (Existing gists on GitHub are not deleted.)')) return;
   localStorage.removeItem('overlay-gh-token');
-  localStorage.removeItem('overlay-gist-id');
+  localStorage.removeItem('overlay-registry-gist');
+  localStorage.removeItem('overlay-active-streamer');
   ghToken = '';
-  gistID = '';
+  registryGistID = '';
+  activeStreamer = '';
+  registry = {};
   cloudURL = '';
   document.getElementById('gh-token-setup').style.display = 'block';
   document.getElementById('gh-link-controls').style.display = 'none';
   document.getElementById('gh-token').value = '';
   document.getElementById('cloud-url').value = '';
-  document.getElementById('blob-status').textContent = '';
-  saveConfig();
+  setStatus('');
 }
 
-function createStreamerLink() {
-  if (!ghToken) { showToast('Save a GitHub token first'); return; }
-  const config = getConfig();
-  const statusEl = document.getElementById('blob-status');
-  statusEl.textContent = 'Creating gist...';
-  statusEl.style.color = '#ff0';
-
-  fetch('https://api.github.com/gists', {
-    method: 'POST',
-    headers: {
-      'Accept': 'application/vnd.github+json',
-      'Authorization': 'Bearer ' + ghToken,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      description: 'Multi-Stream Overlay Config',
-      public: true,
-      files: {
-        [GIST_FILENAME]: { content: JSON.stringify(config, null, 2) },
-      },
-    }),
-  }).then(async r => {
-    if (!r.ok) {
-      const errText = await r.text().catch(() => '');
-      throw new Error('Status ' + r.status + ' - ' + errText.slice(0, 100));
+// Find existing registry gist or create a new one
+async function initRegistry() {
+  setStatus('Loading registry...', '#ff0');
+  try {
+    if (!registryGistID) {
+      // Search through user's gists for one with our marker description
+      const r = await fetch('https://api.github.com/gists?per_page=100', { headers: ghHeaders() });
+      if (!r.ok) throw new Error('List gists: ' + r.status);
+      const gists = await r.json();
+      const found = gists.find(g => (g.description || '').includes('[overlay-v2] streamer registry'));
+      if (found) {
+        registryGistID = found.id;
+        localStorage.setItem('overlay-registry-gist', registryGistID);
+      } else {
+        // Create new registry gist
+        const cr = await fetch('https://api.github.com/gists', {
+          method: 'POST', headers: ghHeaders(),
+          body: JSON.stringify({
+            description: REGISTRY_DESC,
+            public: false,
+            files: { [REGISTRY_FILENAME]: { content: '{}' } },
+          }),
+        });
+        if (!cr.ok) throw new Error('Create registry: ' + cr.status);
+        const created = await cr.json();
+        registryGistID = created.id;
+        localStorage.setItem('overlay-registry-gist', registryGistID);
+      }
     }
-    return r.json();
-  }).then(gist => {
-    gistID = gist.id;
-    localStorage.setItem('overlay-gist-id', gistID);
-    cloudURL = `https://gist.githubusercontent.com/raw/${gistID}/${GIST_FILENAME}`;
+    // Fetch registry contents
+    const rg = await fetch('https://api.github.com/gists/' + registryGistID, { headers: ghHeaders() });
+    if (!rg.ok) throw new Error('Fetch registry: ' + rg.status);
+    const data = await rg.json();
+    const content = data.files[REGISTRY_FILENAME]?.content || '{}';
+    try { registry = JSON.parse(content); } catch (e) { registry = {}; }
+    populateStreamerSelect();
+    setStatus('Registry loaded (' + Object.keys(registry).length + ' streamers)', '#0f0');
+  } catch (e) {
+    setStatus('Registry error: ' + e.message, '#f44');
+  }
+}
+
+function populateStreamerSelect() {
+  const sel = document.getElementById('streamer-select');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— select streamer —</option>';
+  Object.keys(registry).sort().forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    if (name === activeStreamer) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  // Update cloud URL display
+  if (activeStreamer && registry[activeStreamer]) {
+    cloudURL = `https://gist.githubusercontent.com/raw/${registry[activeStreamer]}/${GIST_FILENAME}`;
     document.getElementById('cloud-url').value = cloudURL;
-    saveConfig();
-    statusEl.textContent = 'Gist created! Click Copy Streamer URL.';
-    statusEl.style.color = '#0f0';
-    showToast('Streamer link ready');
-  }).catch(e => {
-    statusEl.textContent = 'Failed: ' + e.message;
-    statusEl.style.color = '#f44';
-  });
+  }
 }
 
-function pushStreamerUpdate() {
-  if (!ghToken) { showToast('Save a GitHub token first'); return; }
-  if (!gistID) { showToast('Click Create Link first'); return; }
-  const config = getConfig();
-  const statusEl = document.getElementById('blob-status');
-  statusEl.textContent = 'Pushing...';
-  statusEl.style.color = '#ff0';
+async function refreshRegistry() {
+  registryGistID = localStorage.getItem('overlay-registry-gist') || '';
+  await initRegistry();
+}
 
-  fetch('https://api.github.com/gists/' + gistID, {
-    method: 'PATCH',
-    headers: {
-      'Accept': 'application/vnd.github+json',
-      'Authorization': 'Bearer ' + ghToken,
-      'Content-Type': 'application/json',
-    },
+async function saveRegistry() {
+  const r = await fetch('https://api.github.com/gists/' + registryGistID, {
+    method: 'PATCH', headers: ghHeaders(),
     body: JSON.stringify({
-      files: {
-        [GIST_FILENAME]: { content: JSON.stringify(config, null, 2) },
-      },
+      files: { [REGISTRY_FILENAME]: { content: JSON.stringify(registry, null, 2) } },
     }),
-  }).then(async r => {
-    if (!r.ok) {
-      const errText = await r.text().catch(() => '');
-      throw new Error('Status ' + r.status + ' - ' + errText.slice(0, 100));
-    }
-    statusEl.textContent = 'Pushed! Streamer can use !reload.';
-    statusEl.style.color = '#0f0';
-    showToast('Update pushed');
-  }).catch(e => {
-    statusEl.textContent = 'Failed: ' + e.message;
-    statusEl.style.color = '#f44';
   });
+  if (!r.ok) throw new Error('Save registry: ' + r.status);
+}
+
+async function addNewStreamer() {
+  if (!ghToken) { showToast('Save a GitHub token first'); return; }
+  const name = (prompt('Streamer name (e.g. TheCheeseBall81):') || '').trim();
+  if (!name) return;
+  if (registry[name]) {
+    if (!confirm(`"${name}" exists. Overwrite their config?`)) return;
+  }
+  setStatus('Creating gist for ' + name + '...', '#ff0');
+  try {
+    const config = getConfig();
+    const cr = await fetch('https://api.github.com/gists', {
+      method: 'POST', headers: ghHeaders(),
+      body: JSON.stringify({
+        description: '[overlay-v2] config for ' + name,
+        public: true,
+        files: { [GIST_FILENAME]: { content: JSON.stringify(config, null, 2) } },
+      }),
+    });
+    if (!cr.ok) throw new Error('Create gist: ' + cr.status);
+    const gist = await cr.json();
+    registry[name] = gist.id;
+    await saveRegistry();
+    activeStreamer = name;
+    localStorage.setItem('overlay-active-streamer', activeStreamer);
+    populateStreamerSelect();
+    setStatus(name + ' added! Click Copy Streamer URL.', '#0f0');
+    showToast('Streamer "' + name + '" added');
+  } catch (e) {
+    setStatus('Failed: ' + e.message, '#f44');
+  }
+}
+
+async function onStreamerSelect() {
+  const sel = document.getElementById('streamer-select');
+  const name = sel.value;
+  if (!name) { activeStreamer = ''; return; }
+  if (!registry[name]) return;
+  activeStreamer = name;
+  localStorage.setItem('overlay-active-streamer', name);
+  cloudURL = `https://gist.githubusercontent.com/raw/${registry[name]}/${GIST_FILENAME}`;
+  document.getElementById('cloud-url').value = cloudURL;
+  setStatus('Loading ' + name + "'s config...", '#ff0');
+  try {
+    const r = await fetch('https://api.github.com/gists/' + registry[name], { headers: ghHeaders() });
+    if (!r.ok) throw new Error('Fetch: ' + r.status);
+    const data = await r.json();
+    const content = data.files[GIST_FILENAME]?.content;
+    if (!content) throw new Error('Empty gist');
+    const config = JSON.parse(content);
+    applyConfig(config, 'load');
+    // Set chat channel from streamer name as default
+    const chatEl = document.getElementById('chat-channel');
+    if (chatEl && !chatEl.value) chatEl.value = name;
+    setStatus('Loaded ' + name, '#0f0');
+  } catch (e) {
+    setStatus('Load failed: ' + e.message, '#f44');
+  }
+}
+
+async function pushStreamerUpdate() {
+  if (!ghToken) { showToast('Save a GitHub token first'); return; }
+  if (!activeStreamer || !registry[activeStreamer]) {
+    showToast('Select or add a streamer first'); return;
+  }
+  setStatus('Pushing update for ' + activeStreamer + '...', '#ff0');
+  try {
+    const config = getConfig();
+    const r = await fetch('https://api.github.com/gists/' + registry[activeStreamer], {
+      method: 'PATCH', headers: ghHeaders(),
+      body: JSON.stringify({
+        files: { [GIST_FILENAME]: { content: JSON.stringify(config, null, 2) } },
+      }),
+    });
+    if (!r.ok) throw new Error('Status ' + r.status);
+    setStatus('Pushed! Streamer can !reload.', '#0f0');
+    showToast('Update pushed for ' + activeStreamer);
+  } catch (e) {
+    setStatus('Failed: ' + e.message, '#f44');
+  }
+}
+
+async function removeCurrentStreamer() {
+  if (!activeStreamer) { showToast('No streamer selected'); return; }
+  if (!confirm(`Remove "${activeStreamer}" from registry? (The gist itself stays on GitHub.)`)) return;
+  delete registry[activeStreamer];
+  try {
+    await saveRegistry();
+    activeStreamer = '';
+    localStorage.removeItem('overlay-active-streamer');
+    populateStreamerSelect();
+    setStatus('Removed', '#0f0');
+  } catch (e) {
+    setStatus('Failed: ' + e.message, '#f44');
+  }
 }
 
 function copyStreamerLink() {
