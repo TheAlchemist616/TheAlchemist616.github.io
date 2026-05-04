@@ -520,6 +520,20 @@
   </div>
 
   <div class="sidebar-section">
+    <h3>Streamer Permanent Link</h3>
+    <p style="font-size:11px; color:#999; margin-bottom:6px;">Create a permanent OBS source URL that pulls config from cloud storage. Push updates anytime — streamer triggers <code>!reload</code> to pick them up.</p>
+    <div class="sidebar-row">
+      <input type="text" id="blob-id" placeholder="streamer link ID (auto-generated)" readonly>
+    </div>
+    <div class="sidebar-row" style="gap:4px; flex-wrap:wrap;">
+      <button class="btn btn-sm btn-primary" onclick="createStreamerLink()">Create Link</button>
+      <button class="btn btn-sm" onclick="updateStreamerLink()">Push Update</button>
+      <button class="btn btn-sm" onclick="copyStreamerLink()">Copy URL</button>
+    </div>
+    <div id="blob-status" style="font-size:11px; color:#666; margin-top:4px;"></div>
+  </div>
+
+  <div class="sidebar-section">
     <h3>Twitch Chat Commands</h3>
     <div class="sidebar-row">
       <input type="text" id="chat-channel" placeholder="twitch channel name (e.g. thealchemist616)">
@@ -548,7 +562,8 @@
       <code>!frame &lt;url&gt;</code> — load frame image<br>
       <code>!frame off</code> — remove frame<br>
       <code>!config &lt;url/hash&gt;</code> — load full config<br>
-      <code>!reload</code> — reload overlay
+      <code>!reload</code> — pull latest config from cloud<br>
+      <code>!sync</code> — re-sync all stream players
     </div>
   </div>
 
@@ -1693,6 +1708,7 @@ function getConfig() {
     frameURL: frameURL || '',
     frameLayer: frameLayer || null,
     timerLayer: raceTimerState.layer || null,
+    streamerBlobID: streamerBlobID || '',
   };
 }
 
@@ -1802,6 +1818,12 @@ function loadConfig() {
   if (config.timerLayer) {
     setTimerLayer(config.timerLayer);
   }
+  // Restore streamer blob ID so Push Update works after reload
+  if (config.streamerBlobID) {
+    streamerBlobID = config.streamerBlobID;
+    const el = document.getElementById('blob-id');
+    if (el) el.value = streamerBlobID;
+  }
 
   renderAll();
 }
@@ -1881,6 +1903,141 @@ function exportURL() {
     showToast('URL copied to clipboard!');
   }).catch(() => {
     prompt('Copy this URL:', url);
+  });
+}
+
+// ============================================================
+// JSONBLOB STREAMER LINK
+// ============================================================
+let streamerBlobID = '';
+
+const JSONBLOB_API = 'https://jsonblob.com/api/jsonBlob';
+
+function createStreamerLink() {
+  const config = getConfig();
+  const statusEl = document.getElementById('blob-status');
+  statusEl.textContent = 'Creating link...';
+  statusEl.style.color = '#ff0';
+
+  fetch(JSONBLOB_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(config),
+  }).then(r => {
+    if (!r.ok) throw new Error('Status ' + r.status);
+    const loc = r.headers.get('Location') || '';
+    const id = loc.split('/').pop();
+    if (!id) throw new Error('No ID in response');
+    streamerBlobID = id;
+    document.getElementById('blob-id').value = id;
+    saveConfig();
+    statusEl.textContent = 'Link created! Click Copy URL to share.';
+    statusEl.style.color = '#0f0';
+    showToast('Streamer link created');
+  }).catch(e => {
+    statusEl.textContent = 'Failed: ' + e.message;
+    statusEl.style.color = '#f44';
+  });
+}
+
+function updateStreamerLink() {
+  if (!streamerBlobID) {
+    showToast('No streamer link — click Create Link first');
+    return;
+  }
+  const config = getConfig();
+  const statusEl = document.getElementById('blob-status');
+  statusEl.textContent = 'Pushing update...';
+  statusEl.style.color = '#ff0';
+
+  fetch(JSONBLOB_API + '/' + streamerBlobID, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(config),
+  }).then(r => {
+    if (!r.ok) throw new Error('Status ' + r.status);
+    statusEl.textContent = 'Update pushed! Streamer can use !reload.';
+    statusEl.style.color = '#0f0';
+    showToast('Config pushed');
+  }).catch(e => {
+    statusEl.textContent = 'Failed: ' + e.message;
+    statusEl.style.color = '#f44';
+  });
+}
+
+function copyStreamerLink() {
+  if (!streamerBlobID) {
+    showToast('No streamer link — click Create Link first');
+    return;
+  }
+  const url = window.location.origin + window.location.pathname + '?id=' + streamerBlobID;
+  navigator.clipboard.writeText(url).then(() => {
+    showToast('Streamer URL copied!');
+  }).catch(() => {
+    prompt('Copy this URL:', url);
+  });
+}
+
+function loadFromBlob(id, isReload) {
+  const statusEl = document.getElementById('blob-status');
+  if (statusEl) {
+    statusEl.textContent = 'Loading from cloud...';
+    statusEl.style.color = '#ff0';
+  }
+  return fetch(JSONBLOB_API + '/' + id, {
+    headers: { 'Accept': 'application/json' }
+  }).then(r => {
+    if (!r.ok) throw new Error('Status ' + r.status);
+    return r.json();
+  }).then(config => {
+    streamerBlobID = id;
+    const blobIdEl = document.getElementById('blob-id');
+    if (blobIdEl) blobIdEl.value = id;
+    if (isReload) {
+      // Apply via existing applyConfig (preserves DOM teardown logic)
+      applyConfig(config, 'reload');
+    } else {
+      // Initial load — replace panels, render
+      panels = config.panels.map((p, i) => ({
+        id: (p.type === 'url' ? 'u' : p.type === 'text' ? 't' : 'p') + Date.now() + '_' + i,
+        type: p.type || 'stream',
+        channel: p.channel || `channel${i + 1}`,
+        url: p.url || '',
+        text: p.text || '',
+        textFont: p.textFont || "'Arial Black', sans-serif",
+        textSize: p.textSize || 36,
+        textColor: p.textColor || '#ffffff',
+        textBg: p.textBg || '#000000',
+        textBgTransparent: p.textBgTransparent || false,
+        textAlign: p.textAlign || 'center',
+        x: p.x || 0, y: p.y || 0,
+        w: p.w || 400, h: p.h || 225,
+        zoom: p.zoom || 1,
+        panX: p.panX || 0, panY: p.panY || 0,
+        layer: p.layer || null,
+      }));
+      if (config.timer) {
+        if (config.timer.room) {
+          document.getElementById('racetime-url').value = config.timer.room;
+          connectRaceTimer();
+        }
+        raceTimerState.x = config.timer.x || 760;
+        raceTimerState.y = config.timer.y || 520;
+      }
+      if (config.frameURL) loadFrameFromURL(config.frameURL);
+      renderAll();
+      saveConfig();
+    }
+    if (statusEl) {
+      statusEl.textContent = 'Loaded from cloud';
+      statusEl.style.color = '#0f0';
+    }
+  }).catch(e => {
+    if (statusEl) {
+      statusEl.textContent = 'Load failed: ' + e.message;
+      statusEl.style.color = '#f44';
+    }
+    showToast('Cloud load failed');
   });
 }
 
@@ -2129,8 +2286,7 @@ function handleCommand(user, msg) {
       showToast(`[${user}] Muted all`);
       break;
     }
-    case 'sync':
-    case 'reload': {
+    case 'sync': {
       // Reload all stream iframes by re-initing players
       for (const [id, entry] of panelElements) {
         if (entry.player && entry.player.setChannel) {
@@ -2139,6 +2295,23 @@ function handleCommand(user, msg) {
         }
       }
       showToast(`[${user}] Synced all streams`);
+      break;
+    }
+    case 'reload': {
+      // Pull latest config from streamer link if connected
+      if (streamerBlobID) {
+        loadFromBlob(streamerBlobID, true);
+        showToast(`[${user}] Reloading from cloud...`);
+      } else {
+        // Fallback to syncing iframes
+        for (const [id, entry] of panelElements) {
+          if (entry.player && entry.player.setChannel) {
+            const p = panels.find(p => p.id === id);
+            if (p) entry.player.setChannel(p.channel);
+          }
+        }
+        showToast(`[${user}] Reloaded streams`);
+      }
       break;
     }
     case 'layout': {
@@ -2578,7 +2751,13 @@ function init() {
     presetContainer.appendChild(btn);
   });
 
-  loadConfig();
+  // Check for ?id= (JSONblob streamer link) — takes priority over local config
+  const idParam = new URLSearchParams(window.location.search).get('id');
+  if (idParam) {
+    loadFromBlob(idParam, false);
+  } else {
+    loadConfig();
+  }
 
   // Auto-connect chat if ?chat=channelname in URL
   const chatParam = new URLSearchParams(window.location.search).get('chat');
