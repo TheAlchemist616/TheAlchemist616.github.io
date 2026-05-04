@@ -521,16 +521,21 @@
 
   <div class="sidebar-section">
     <h3>Streamer Permanent Link</h3>
-    <p style="font-size:11px; color:#999; margin-bottom:6px;">Create a permanent OBS source URL that pulls config from cloud storage. Push updates anytime — streamer triggers <code>!reload</code> to pick them up.</p>
+    <p style="font-size:11px; color:#999; margin-bottom:6px;">
+      <b>Setup:</b><br>
+      1. Click <b>Copy Config JSON</b> below (in Config section)<br>
+      2. Go to <a href="https://gist.github.com" target="_blank" style="color:#00d4ff;">gist.github.com</a> &rarr; New gist (public) &rarr; paste JSON<br>
+      3. After save, click <b>Raw</b> button on the file &rarr; copy that URL<br>
+      4. Paste the raw URL here:
+    </p>
     <div class="sidebar-row">
-      <input type="text" id="blob-id" placeholder="streamer link ID (auto-generated)" readonly>
+      <input type="text" id="cloud-url" placeholder="https://gist.githubusercontent.com/.../raw/...">
     </div>
     <div class="sidebar-row" style="gap:4px; flex-wrap:wrap;">
-      <button class="btn btn-sm btn-primary" onclick="createStreamerLink()">Create Link</button>
-      <button class="btn btn-sm" onclick="updateStreamerLink()">Push Update</button>
-      <button class="btn btn-sm" onclick="copyStreamerLink()">Copy URL</button>
+      <button class="btn btn-sm btn-primary" onclick="copyStreamerLink()">Copy Streamer URL</button>
+      <button class="btn btn-sm" onclick="testCloudURL()">Test Load</button>
     </div>
-    <div id="blob-status" style="font-size:11px; color:#666; margin-top:4px;"></div>
+    <div id="blob-status" style="font-size:11px; color:#666; margin-top:4px;">To update: edit your gist on github.com, then streamer types !reload</div>
   </div>
 
   <div class="sidebar-section">
@@ -1708,7 +1713,7 @@ function getConfig() {
     frameURL: frameURL || '',
     frameLayer: frameLayer || null,
     timerLayer: raceTimerState.layer || null,
-    streamerBlobID: streamerBlobID || '',
+    cloudURL: cloudURL || '',
   };
 }
 
@@ -1819,10 +1824,10 @@ function loadConfig() {
     setTimerLayer(config.timerLayer);
   }
   // Restore streamer blob ID so Push Update works after reload
-  if (config.streamerBlobID) {
-    streamerBlobID = config.streamerBlobID;
-    const el = document.getElementById('blob-id');
-    if (el) el.value = streamerBlobID;
+  if (config.cloudURL) {
+    cloudURL = config.cloudURL;
+    const el = document.getElementById('cloud-url');
+    if (el) el.value = cloudURL;
   }
 
   renderAll();
@@ -1907,142 +1912,63 @@ function exportURL() {
 }
 
 // ============================================================
-// JSONBLOB STREAMER LINK
+// CLOUD CONFIG URL (e.g. GitHub Gist raw URL)
 // ============================================================
-let streamerBlobID = '';
-
-// JSONblob via corsproxy.io — JSONblob doesn't expose CORS headers,
-// corsproxy.io handles it transparently for all HTTP methods
-const JSONBLOB_API = 'https://corsproxy.io/?url=' + encodeURIComponent('https://jsonblob.com/api/jsonBlob');
-const JSONBLOB_BASE = 'https://corsproxy.io/?url=https%3A%2F%2Fjsonblob.com%2Fapi%2FjsonBlob%2F';
-
-function createStreamerLink() {
-  const config = getConfig();
-  const statusEl = document.getElementById('blob-status');
-  statusEl.textContent = 'Creating link...';
-  statusEl.style.color = '#ff0';
-
-  // Generate UUID client-side, then PUT to that ID
-  // This sidesteps the issue of reading blob ID from the response
-  const id = generateUUID();
-  fetch(JSONBLOB_BASE + id, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config),
-  }).then(async r => {
-    if (!r.ok) {
-      const errText = await r.text().catch(() => '');
-      throw new Error('Status ' + r.status + (errText ? ' - ' + errText.slice(0, 80) : ''));
-    }
-    streamerBlobID = id;
-    document.getElementById('blob-id').value = id;
-    saveConfig();
-    statusEl.textContent = 'Link created! Click Copy URL to share.';
-    statusEl.style.color = '#0f0';
-    showToast('Streamer link created');
-  }).catch(e => {
-    statusEl.textContent = 'Failed: ' + e.message;
-    statusEl.style.color = '#f44';
-    console.error('Streamer link create failed:', e);
-  });
-}
-
-function generateUUID() {
-  if (crypto && crypto.randomUUID) return crypto.randomUUID();
-  // Fallback
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
-
-function updateStreamerLink() {
-  if (!streamerBlobID) {
-    showToast('No streamer link — click Create Link first');
-    return;
-  }
-  const config = getConfig();
-  const statusEl = document.getElementById('blob-status');
-  statusEl.textContent = 'Pushing update...';
-  statusEl.style.color = '#ff0';
-
-  fetch(JSONBLOB_BASE + streamerBlobID, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config),
-  }).then(r => {
-    if (!r.ok) throw new Error('Status ' + r.status);
-    statusEl.textContent = 'Update pushed! Streamer can use !reload.';
-    statusEl.style.color = '#0f0';
-    showToast('Config pushed');
-  }).catch(e => {
-    statusEl.textContent = 'Failed: ' + e.message;
-    statusEl.style.color = '#f44';
-  });
-}
+let cloudURL = '';
 
 function copyStreamerLink() {
-  if (!streamerBlobID) {
-    showToast('No streamer link — click Create Link first');
-    return;
-  }
-  const url = window.location.origin + window.location.pathname + '?id=' + streamerBlobID;
-  navigator.clipboard.writeText(url).then(() => {
+  const url = (document.getElementById('cloud-url').value || '').trim();
+  if (!url) { showToast('Paste a JSON URL first'); return; }
+  cloudURL = url;
+  saveConfig();
+  const chat = (document.getElementById('chat-channel').value || '').trim();
+  const params = new URLSearchParams();
+  params.set('config', url);
+  if (chat) params.set('chat', chat);
+  const streamerURL = window.location.origin + window.location.pathname + '?' + params.toString();
+  navigator.clipboard.writeText(streamerURL).then(() => {
     showToast('Streamer URL copied!');
   }).catch(() => {
-    prompt('Copy this URL:', url);
+    prompt('Copy this URL:', streamerURL);
   });
 }
 
-function loadFromBlob(id, isReload) {
+function testCloudURL() {
+  const url = (document.getElementById('cloud-url').value || '').trim();
+  if (!url) { showToast('Paste a JSON URL first'); return; }
+  const statusEl = document.getElementById('blob-status');
+  statusEl.textContent = 'Testing URL...';
+  statusEl.style.color = '#ff0';
+  fetch(url).then(r => {
+    if (!r.ok) throw new Error('Status ' + r.status);
+    return r.json();
+  }).then(config => {
+    if (!config.panels) throw new Error('Not a valid config (no panels)');
+    cloudURL = url;
+    saveConfig();
+    statusEl.textContent = 'OK! ' + config.panels.length + ' panels found';
+    statusEl.style.color = '#0f0';
+    showToast('Cloud URL works');
+  }).catch(e => {
+    statusEl.textContent = 'Failed: ' + e.message;
+    statusEl.style.color = '#f44';
+  });
+}
+
+function loadFromCloud(url, isReload) {
   const statusEl = document.getElementById('blob-status');
   if (statusEl) {
     statusEl.textContent = 'Loading from cloud...';
     statusEl.style.color = '#ff0';
   }
-  return fetch(JSONBLOB_BASE + id).then(r => {
+  return fetch(url).then(r => {
     if (!r.ok) throw new Error('Status ' + r.status);
     return r.json();
   }).then(config => {
-    streamerBlobID = id;
-    const blobIdEl = document.getElementById('blob-id');
-    if (blobIdEl) blobIdEl.value = id;
-    if (isReload) {
-      // Apply via existing applyConfig (preserves DOM teardown logic)
-      applyConfig(config, 'reload');
-    } else {
-      // Initial load — replace panels, render
-      panels = config.panels.map((p, i) => ({
-        id: (p.type === 'url' ? 'u' : p.type === 'text' ? 't' : 'p') + Date.now() + '_' + i,
-        type: p.type || 'stream',
-        channel: p.channel || `channel${i + 1}`,
-        url: p.url || '',
-        text: p.text || '',
-        textFont: p.textFont || "'Arial Black', sans-serif",
-        textSize: p.textSize || 36,
-        textColor: p.textColor || '#ffffff',
-        textBg: p.textBg || '#000000',
-        textBgTransparent: p.textBgTransparent || false,
-        textAlign: p.textAlign || 'center',
-        x: p.x || 0, y: p.y || 0,
-        w: p.w || 400, h: p.h || 225,
-        zoom: p.zoom || 1,
-        panX: p.panX || 0, panY: p.panY || 0,
-        layer: p.layer || null,
-      }));
-      if (config.timer) {
-        if (config.timer.room) {
-          document.getElementById('racetime-url').value = config.timer.room;
-          connectRaceTimer();
-        }
-        raceTimerState.x = config.timer.x || 760;
-        raceTimerState.y = config.timer.y || 520;
-      }
-      if (config.frameURL) loadFrameFromURL(config.frameURL);
-      renderAll();
-      saveConfig();
-    }
+    cloudURL = url;
+    const cloudInput = document.getElementById('cloud-url');
+    if (cloudInput) cloudInput.value = url;
+    applyConfig(config, isReload ? 'reload' : 'load');
     if (statusEl) {
       statusEl.textContent = 'Loaded from cloud';
       statusEl.style.color = '#0f0';
@@ -2314,8 +2240,8 @@ function handleCommand(user, msg) {
     }
     case 'reload': {
       // Pull latest config from streamer link if connected
-      if (streamerBlobID) {
-        loadFromBlob(streamerBlobID, true);
+      if (cloudURL) {
+        loadFromCloud(cloudURL, true);
         showToast(`[${user}] Reloading from cloud...`);
       } else {
         // Fallback to syncing iframes
@@ -2766,10 +2692,10 @@ function init() {
     presetContainer.appendChild(btn);
   });
 
-  // Check for ?id= (JSONblob streamer link) — takes priority over local config
-  const idParam = new URLSearchParams(window.location.search).get('id');
-  if (idParam) {
-    loadFromBlob(idParam, false);
+  // Check for ?config=<url> (cloud URL) — takes priority over local config
+  const configParam = new URLSearchParams(window.location.search).get('config');
+  if (configParam) {
+    loadFromCloud(configParam, false);
   } else {
     loadConfig();
   }
