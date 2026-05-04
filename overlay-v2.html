@@ -1911,7 +1911,8 @@ function exportURL() {
 // ============================================================
 let streamerBlobID = '';
 
-const JSONBLOB_API = 'https://jsonblob.com/api/jsonBlob';
+// npoint.io explicitly supports CORS for all origins
+const JSONBLOB_API = 'https://api.npoint.io';
 
 function createStreamerLink() {
   const config = getConfig();
@@ -1919,28 +1920,27 @@ function createStreamerLink() {
   statusEl.textContent = 'Creating link...';
   statusEl.style.color = '#ff0';
 
-  // POST without Accept header so response body is the new URL (text)
-  // — Location header isn't exposed to CORS by JSONblob
+  // POST to npoint.io — Accept: text/plain gives URL in body
   fetch(JSONBLOB_API, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Accept': 'text/plain' },
     body: JSON.stringify(config),
   }).then(async r => {
     if (!r.ok) {
       const errText = await r.text().catch(() => '');
       throw new Error('Status ' + r.status + (errText ? ' - ' + errText.slice(0, 80) : ''));
     }
-    // Try Location header first; fallback to response body (which is the URL as text)
+    // npoint returns the new URL (e.g. https://api.npoint.io/abc123) as plain text
+    const body = (await r.text()).trim();
     let id = '';
-    const loc = r.headers.get('Location') || '';
-    if (loc) id = loc.split('/').pop();
+    const m = body.match(/npoint\.io\/([\w-]+)/);
+    if (m) id = m[1];
+    // Fallback: Location header if exposed
     if (!id) {
-      const body = (await r.text()).trim();
-      // Body is the full URL like https://jsonblob.com/api/jsonBlob/abc123
-      const m = body.match(/jsonBlob\/([\w-]+)/);
-      if (m) id = m[1];
+      const loc = r.headers.get('Location') || '';
+      if (loc) id = loc.split('/').pop();
     }
-    if (!id) throw new Error('Could not get blob ID from response');
+    if (!id) throw new Error('Could not parse ID from response: ' + body.slice(0, 80));
     streamerBlobID = id;
     document.getElementById('blob-id').value = id;
     saveConfig();
