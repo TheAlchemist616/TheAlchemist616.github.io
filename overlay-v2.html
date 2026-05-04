@@ -1911,8 +1911,10 @@ function exportURL() {
 // ============================================================
 let streamerBlobID = '';
 
-// npoint.io explicitly supports CORS for all origins
-const JSONBLOB_API = 'https://api.npoint.io';
+// JSONblob via corsproxy.io — JSONblob doesn't expose CORS headers,
+// corsproxy.io handles it transparently for all HTTP methods
+const JSONBLOB_API = 'https://corsproxy.io/?url=' + encodeURIComponent('https://jsonblob.com/api/jsonBlob');
+const JSONBLOB_BASE = 'https://corsproxy.io/?url=https%3A%2F%2Fjsonblob.com%2Fapi%2FjsonBlob%2F';
 
 function createStreamerLink() {
   const config = getConfig();
@@ -1920,27 +1922,26 @@ function createStreamerLink() {
   statusEl.textContent = 'Creating link...';
   statusEl.style.color = '#ff0';
 
-  // POST to npoint.io — Accept: text/plain gives URL in body
+  // POST via CORS proxy → JSONblob; response body is the new blob URL
   fetch(JSONBLOB_API, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'text/plain' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   }).then(async r => {
     if (!r.ok) {
       const errText = await r.text().catch(() => '');
       throw new Error('Status ' + r.status + (errText ? ' - ' + errText.slice(0, 80) : ''));
     }
-    // npoint returns the new URL (e.g. https://api.npoint.io/abc123) as plain text
-    const body = (await r.text()).trim();
+    // JSONblob returns the new URL like https://jsonblob.com/api/jsonBlob/abc123
     let id = '';
-    const m = body.match(/npoint\.io\/([\w-]+)/);
-    if (m) id = m[1];
-    // Fallback: Location header if exposed
+    const loc = r.headers.get('Location') || '';
+    if (loc) id = loc.split('/').pop();
     if (!id) {
-      const loc = r.headers.get('Location') || '';
-      if (loc) id = loc.split('/').pop();
+      const body = (await r.text()).trim();
+      const m = body.match(/jsonBlob\/([\w-]+)/);
+      if (m) id = m[1];
     }
-    if (!id) throw new Error('Could not parse ID from response: ' + body.slice(0, 80));
+    if (!id) throw new Error('Could not parse blob ID');
     streamerBlobID = id;
     document.getElementById('blob-id').value = id;
     saveConfig();
@@ -1964,9 +1965,9 @@ function updateStreamerLink() {
   statusEl.textContent = 'Pushing update...';
   statusEl.style.color = '#ff0';
 
-  fetch(JSONBLOB_API + '/' + streamerBlobID, {
+  fetch(JSONBLOB_BASE + streamerBlobID, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   }).then(r => {
     if (!r.ok) throw new Error('Status ' + r.status);
@@ -1998,9 +1999,7 @@ function loadFromBlob(id, isReload) {
     statusEl.textContent = 'Loading from cloud...';
     statusEl.style.color = '#ff0';
   }
-  return fetch(JSONBLOB_API + '/' + id, {
-    headers: { 'Accept': 'application/json' }
-  }).then(r => {
+  return fetch(JSONBLOB_BASE + id).then(r => {
     if (!r.ok) throw new Error('Status ' + r.status);
     return r.json();
   }).then(config => {
