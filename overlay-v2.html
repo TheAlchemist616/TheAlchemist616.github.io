@@ -1922,9 +1922,11 @@ function createStreamerLink() {
   statusEl.textContent = 'Creating link...';
   statusEl.style.color = '#ff0';
 
-  // POST via CORS proxy → JSONblob; response body is the new blob URL
-  fetch(JSONBLOB_API, {
-    method: 'POST',
+  // Generate UUID client-side, then PUT to that ID
+  // This sidesteps the issue of reading blob ID from the response
+  const id = generateUUID();
+  fetch(JSONBLOB_BASE + id, {
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
   }).then(async r => {
@@ -1932,28 +1934,6 @@ function createStreamerLink() {
       const errText = await r.text().catch(() => '');
       throw new Error('Status ' + r.status + (errText ? ' - ' + errText.slice(0, 80) : ''));
     }
-    let id = '';
-    // Try Location header first (sometimes proxied)
-    const loc = r.headers.get('Location') || r.headers.get('location') || '';
-    if (loc) {
-      const m = loc.match(/([\w-]+)\/?$/);
-      if (m) id = m[1];
-    }
-    // Try response body (URL or JSON)
-    if (!id) {
-      const body = (await r.text()).trim();
-      console.log('Streamer link POST body:', body.slice(0, 200));
-      const urlMatch = body.match(/jsonBlob\/([\w-]+)/);
-      if (urlMatch) id = urlMatch[1];
-      // Maybe JSON with id field
-      if (!id) {
-        try {
-          const j = JSON.parse(body);
-          if (j.id) id = j.id;
-        } catch (e) {}
-      }
-    }
-    if (!id) throw new Error('Could not parse blob ID — see console');
     streamerBlobID = id;
     document.getElementById('blob-id').value = id;
     saveConfig();
@@ -1964,6 +1944,16 @@ function createStreamerLink() {
     statusEl.textContent = 'Failed: ' + e.message;
     statusEl.style.color = '#f44';
     console.error('Streamer link create failed:', e);
+  });
+}
+
+function generateUUID() {
+  if (crypto && crypto.randomUUID) return crypto.randomUUID();
+  // Fallback
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
   });
 }
 
