@@ -2170,11 +2170,16 @@ async function removeCurrentStreamer() {
 }
 
 function copyStreamerLink() {
-  const url = cloudURL || (document.getElementById('cloud-url').value || '').trim();
-  if (!url) { showToast('Click Create Link first'); return; }
-  const chat = (document.getElementById('chat-channel').value || '').trim();
+  // Prefer short ?gist=<id> form when we have an active streamer
   const params = new URLSearchParams();
-  params.set('config', url);
+  if (activeStreamer && registry[activeStreamer]) {
+    params.set('gist', registry[activeStreamer]);
+  } else {
+    const url = cloudURL || (document.getElementById('cloud-url').value || '').trim();
+    if (!url) { showToast('Click Create Link first'); return; }
+    params.set('config', url);
+  }
+  const chat = (document.getElementById('chat-channel').value || '').trim();
   if (chat) params.set('chat', chat);
   const streamerURL = window.location.origin + window.location.pathname + '?' + params.toString();
   navigator.clipboard.writeText(streamerURL).then(() => {
@@ -2945,9 +2950,13 @@ function init() {
 
   loadGHToken();
 
-  // Check for ?config=<url> (cloud URL) — takes priority over local config
-  const configParam = new URLSearchParams(window.location.search).get('config');
-  if (configParam) {
+  // Check for ?gist=<id> (shorthand) or ?config=<url> — both override local
+  const params = new URLSearchParams(window.location.search);
+  const gistParam = params.get('gist');
+  const configParam = params.get('config');
+  if (gistParam) {
+    loadFromCloud(`https://gist.githubusercontent.com/raw/${gistParam}/${GIST_FILENAME}`, false);
+  } else if (configParam) {
     loadFromCloud(configParam, false);
   } else {
     loadConfig();
