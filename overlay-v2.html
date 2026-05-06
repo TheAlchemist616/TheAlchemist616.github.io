@@ -1999,6 +1999,18 @@ function clearGHToken() {
 }
 
 // Find existing registry gist or create a new one
+// After registry loads, if URL has ?gist=<id>, auto-select that streamer
+function syncActiveStreamerFromURL() {
+  const gistParam = new URLSearchParams(window.location.search).get('gist');
+  if (!gistParam) return;
+  const match = Object.keys(registry).find(name => registry[name] === gistParam);
+  if (match) {
+    activeStreamer = match;
+    localStorage.setItem('overlay-active-streamer', match);
+    populateStreamerSelect();
+  }
+}
+
 async function initRegistry() {
   setStatus('Loading registry...', '#ff0');
   try {
@@ -2034,6 +2046,7 @@ async function initRegistry() {
     const content = data.files[REGISTRY_FILENAME]?.content || '{}';
     try { registry = JSON.parse(content); } catch (e) { registry = {}; }
     populateStreamerSelect();
+    syncActiveStreamerFromURL();
     setStatus('Registry loaded (' + Object.keys(registry).length + ' streamers)', '#0f0');
   } catch (e) {
     setStatus('Registry error: ' + e.message, '#f44');
