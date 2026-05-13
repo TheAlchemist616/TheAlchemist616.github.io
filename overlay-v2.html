@@ -2230,7 +2230,9 @@ function loadFromCloud(url, isReload) {
     statusEl.textContent = 'Loading from cloud...';
     statusEl.style.color = '#ff0';
   }
-  return fetch(url).then(r => {
+  // Cache-bust to avoid GitHub raw URL CDN caching stale content
+  const bustedURL = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
+  return fetch(bustedURL, { cache: 'no-store' }).then(r => {
     if (!r.ok) throw new Error('Status ' + r.status);
     return r.json();
   }).then(config => {
