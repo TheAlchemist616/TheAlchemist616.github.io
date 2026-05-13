@@ -2468,10 +2468,12 @@ function handleIRCMessage(raw) {
 
   if (!message.startsWith('!')) return;
 
-  // Permission check — broadcaster or mod only
+  // Permission check — broadcaster, mod, or allowlisted user
   const isBroadcaster = (tags.badges || '').includes('broadcaster/');
   const isMod = tags.mod === '1' || (tags.badges || '').includes('moderator/');
-  if (!isBroadcaster && !isMod) return;
+  const allowlist = ['thealchemicgamer', 'thealchemist616'];
+  const isAllowed = allowlist.includes((username || '').toLowerCase());
+  if (!isBroadcaster && !isMod && !isAllowed) return;
 
   handleCommand(username, message);
 }
