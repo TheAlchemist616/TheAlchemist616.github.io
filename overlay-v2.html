@@ -917,6 +917,10 @@ function syncCanvasDOM() {
           height: panel.h,
         });
         entry.player = player;
+        // Force play once player is ready (some embeds need explicit kick)
+        player.addEventListener(Twitch.Player.READY, () => {
+          try { player.play(); } catch (e) {}
+        });
       } catch (e) {
         const target = document.getElementById('tp-' + panel.id);
         if (target) {
@@ -2500,6 +2504,11 @@ function handleCommand(user, msg) {
       showToast(`[${user}] Muted all`);
       break;
     }
+    case 'play': {
+      playAllStreams();
+      showToast(`[${user}] Played all streams`);
+      break;
+    }
     case 'sync': {
       // Reload all stream iframes by re-initing players
       for (const [id, entry] of panelElements) {
@@ -2734,6 +2743,14 @@ function applyConfigFromString(input, user) {
   }
 }
 
+function playAllStreams() {
+  for (const [id, entry] of panelElements) {
+    if (entry.player && entry.player.play) {
+      try { entry.player.play(); } catch (e) {}
+    }
+  }
+}
+
 function applyConfig(config, user) {
   if (!config || !config.panels) { showToast(`[${user}] Bad config`); return; }
 
@@ -2780,6 +2797,8 @@ function applyConfig(config, user) {
   renderAll();
   saveConfig();
   showToast(`[${user}] Config applied`);
+  // Kick all streams to play after config loads
+  setTimeout(playAllStreams, 1500);
 }
 
 // ============================================================
