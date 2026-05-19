@@ -1405,12 +1405,9 @@ function updatePanelDOM(p) {
 }
 
 function clampPan(p) {
+  // At 1x zoom there's no source to slide, so snap pan to 0. Above 1x, allow
+  // unrestricted overpan — operator can push the stream anywhere.
   if (p.zoom <= 1) { p.panX = 0; p.panY = 0; return; }
-  // Allow full pan range so you can reach any part of the stream
-  const maxPanX = p.w * p.zoom;
-  const maxPanY = p.h * p.zoom;
-  p.panX = Math.max(-maxPanX, Math.min(maxPanX, p.panX));
-  p.panY = Math.max(-maxPanY, Math.min(maxPanY, p.panY));
 }
 
 // ============================================================
@@ -2856,27 +2853,28 @@ function connectRaceTimer() {
   statusEl.textContent = 'Connecting...';
   statusEl.style.color = '#ff0';
 
+  // Show the timer immediately (at 0:00:00) so it renders in OBS even if the
+  // racetime.gg fetch fails or the room hasn't started yet. The fetch below
+  // only fills in startedAt/endedAt when (if) it succeeds.
+  raceTimerState.room = room;
+  raceTimerState.active = true;
+  const timerEl = document.getElementById('race-timer');
+  timerEl.classList.add('visible');
+  timerEl.style.left = raceTimerState.x + 'px';
+  timerEl.style.top = raceTimerState.y + 'px';
+  if (raceTimerState.interval) clearInterval(raceTimerState.interval);
+  raceTimerState.interval = setInterval(updateRaceTimer, 100);
+  updateRaceTimer();
+  saveConfig();
+
   fetch(`https://racetime.gg/${room}/data`)
     .then(r => {
       if (!r.ok) throw new Error('Race not found');
       return r.json();
     })
     .then(data => {
-      raceTimerState.room = room;
       raceTimerState.startedAt = data.started_at ? new Date(data.started_at) : null;
       raceTimerState.endedAt = data.ended_at ? new Date(data.ended_at) : null;
-      raceTimerState.active = true;
-
-      // Show timer
-      const timerEl = document.getElementById('race-timer');
-      timerEl.classList.add('visible');
-      timerEl.style.left = raceTimerState.x + 'px';
-      timerEl.style.top = raceTimerState.y + 'px';
-
-      // Start ticking
-      if (raceTimerState.interval) clearInterval(raceTimerState.interval);
-      raceTimerState.interval = setInterval(updateRaceTimer, 100);
-      updateRaceTimer();
 
       statusEl.textContent = 'Connected: ' + (data.status?.value || 'unknown');
       statusEl.style.color = '#0f0';
@@ -2890,12 +2888,10 @@ function connectRaceTimer() {
           statusEl.textContent += ' | Racers: ' + twitchNames.join(', ');
         }
       }
-
-      saveConfig();
     })
     .catch(e => {
-      statusEl.textContent = 'Error: ' + e.message;
-      statusEl.style.color = '#f44';
+      statusEl.textContent = 'Waiting for race data (' + e.message + ')';
+      statusEl.style.color = '#fa0';
     });
 }
 
