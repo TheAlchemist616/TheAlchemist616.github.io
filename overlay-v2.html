@@ -2777,14 +2777,39 @@ function applyConfig(config, user) {
     layer: p.layer || null,
   }));
 
-  // Restore timer
+  // Restore timer — order matters: set x/y/style state BEFORE connectRaceTimer,
+  // because connectRaceTimer now reads raceTimerState.x/y synchronously.
   if (config.timer) {
+    raceTimerState.x = config.timer.x || 760;
+    raceTimerState.y = config.timer.y || 520;
+    if (config.timer.font) {
+      raceTimerState.font = config.timer.font;
+      document.getElementById('timer-font').value = config.timer.font;
+    }
+    if (config.timer.size) {
+      raceTimerState.size = config.timer.size;
+      document.getElementById('timer-size').value = config.timer.size;
+    }
+    if (config.timer.color) {
+      raceTimerState.color = config.timer.color;
+      document.getElementById('timer-color').value = config.timer.color;
+    }
+    if (config.timer.bg) {
+      raceTimerState.bg = config.timer.bg;
+      document.getElementById('timer-bg').value = config.timer.bg;
+    }
+    if (config.timer.bgTransparent) {
+      raceTimerState.bgTransparent = config.timer.bgTransparent;
+      document.getElementById('timer-bg-transparent').checked = true;
+    }
     if (config.timer.room) {
       document.getElementById('racetime-url').value = config.timer.room;
       connectRaceTimer();
     }
-    raceTimerState.x = config.timer.x || 760;
-    raceTimerState.y = config.timer.y || 520;
+    updateTimerStyle();
+  }
+  if (config.timerLayer) {
+    setTimerLayer(config.timerLayer);
   }
 
   // Restore frame URL
