@@ -583,7 +583,7 @@
       <code>!settext &lt;slot#&gt; &lt;text&gt;</code> — update text<br>
       <code>!zoom &lt;channel&gt; &lt;1-8&gt;</code><br>
       <code>!pan &lt;channel&gt; &lt;x%&gt; &lt;y%&gt;</code><br>
-      <code>!timer &lt;category/room&gt;</code> — racetime<br>
+      <code>!timer &lt;category/room&gt;</code> — racetime (<code>!timer</code> refreshes, <code>!timer off</code> removes)<br>
       <code>!frame &lt;url&gt;</code> — load frame image<br>
       <code>!frame off</code> — remove frame<br>
       <code>!config &lt;url/hash&gt;</code> — load full config<br>
@@ -2660,10 +2660,18 @@ function handleCommand(user, msg) {
     }
     case 'timer': {
       const room = args[0] || '';
-      if (room) {
+      const lower = room.toLowerCase();
+      if (lower === 'off' || lower === 'remove' || lower === 'clear') {
+        disconnectRaceTimer();
+        showToast(`[${user}] Timer removed`);
+      } else if (room) {
         document.getElementById('racetime-url').value = room;
         connectRaceTimer();
         showToast(`[${user}] Timer: ${room}`);
+      } else {
+        // No arg: re-fetch current room (refreshes data without reloading overlay)
+        connectRaceTimer();
+        showToast(`[${user}] Timer refreshed`);
       }
       break;
     }
