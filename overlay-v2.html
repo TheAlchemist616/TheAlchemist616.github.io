@@ -2866,11 +2866,14 @@ let raceTimerState = {
   active: false,
   startedAt: null,
   endedAt: null,
-  interval: null,
+  interval: null,       // 100ms tick that paints the elapsed clock
+  pollInterval: null,   // 10s background poll that re-fetches racetime data
   room: '',
   x: 760,
   y: 520,
 };
+
+const RACE_POLL_MS = 10000;
 
 function updateTimerStyle() {
   const timerEl = document.getElementById('race-timer');
@@ -2900,6 +2903,43 @@ function updateTimerStyle() {
   saveConfig();
 }
 
+// Re-fetch race data and update startedAt/endedAt in place. Called once by
+// connectRaceTimer and then every RACE_POLL_MS in the background so the timer
+// self-heals when the race actually starts/ends — operator does not need to
+// run !timer or !reload.
+function pollRaceTimer() {
+  const room = raceTimerState.room;
+  if (!room) return;
+  const statusEl = document.getElementById('racetime-status');
+  fetch(`https://racetime.gg/${room}/data?t=${Date.now()}`, { cache: 'no-store' })
+    .then(r => {
+      if (!r.ok) throw new Error('Race not found');
+      return r.json();
+    })
+    .then(data => {
+      raceTimerState.startedAt = data.started_at ? new Date(data.started_at) : null;
+      raceTimerState.endedAt = data.ended_at ? new Date(data.ended_at) : null;
+      if (statusEl) {
+        statusEl.textContent = 'Connected: ' + (data.status?.value || 'unknown');
+        statusEl.style.color = '#0f0';
+        if (data.entrants) {
+          const twitchNames = data.entrants
+            .filter(e => e.user && e.user.twitch_name)
+            .map(e => e.user.twitch_name);
+          if (twitchNames.length > 0) {
+            statusEl.textContent += ' | Racers: ' + twitchNames.join(', ');
+          }
+        }
+      }
+    })
+    .catch(e => {
+      if (statusEl) {
+        statusEl.textContent = 'Waiting for race data (' + e.message + ')';
+        statusEl.style.color = '#fa0';
+      }
+    });
+}
+
 function connectRaceTimer() {
   const input = document.getElementById('racetime-url').value.trim();
   if (!input) return;
@@ -2915,8 +2955,8 @@ function connectRaceTimer() {
   statusEl.style.color = '#ff0';
 
   // Show the timer immediately (at 0:00:00) so it renders in OBS even if the
-  // racetime.gg fetch fails or the room hasn't started yet. The fetch below
-  // only fills in startedAt/endedAt when (if) it succeeds.
+  // racetime.gg fetch fails or the room hasn't started yet. pollRaceTimer
+  // fills in startedAt/endedAt when (if) the fetch succeeds.
   raceTimerState.room = room;
   raceTimerState.active = true;
   const timerEl = document.getElementById('race-timer');
@@ -2928,34 +2968,12 @@ function connectRaceTimer() {
   updateRaceTimer();
   saveConfig();
 
-  // Cache-bust both query string and HTTP cache — without this, !timer hits
-  // the browser's cached response and never sees the race actually starting.
-  fetch(`https://racetime.gg/${room}/data?t=${Date.now()}`, { cache: 'no-store' })
-    .then(r => {
-      if (!r.ok) throw new Error('Race not found');
-      return r.json();
-    })
-    .then(data => {
-      raceTimerState.startedAt = data.started_at ? new Date(data.started_at) : null;
-      raceTimerState.endedAt = data.ended_at ? new Date(data.ended_at) : null;
-
-      statusEl.textContent = 'Connected: ' + (data.status?.value || 'unknown');
-      statusEl.style.color = '#0f0';
-
-      // Also pull entrant names into stream panels if they have twitch
-      if (data.entrants) {
-        const twitchNames = data.entrants
-          .filter(e => e.user && e.user.twitch_name)
-          .map(e => e.user.twitch_name);
-        if (twitchNames.length > 0) {
-          statusEl.textContent += ' | Racers: ' + twitchNames.join(', ');
-        }
-      }
-    })
-    .catch(e => {
-      statusEl.textContent = 'Waiting for race data (' + e.message + ')';
-      statusEl.style.color = '#fa0';
-    });
+  // First fetch right away, then keep polling every 10s so the moment the
+  // race starts on racetime.gg the timer picks it up on its own. No more
+  // "the race started but the timer didn't start until we refreshed OBS."
+  pollRaceTimer();
+  if (raceTimerState.pollInterval) clearInterval(raceTimerState.pollInterval);
+  raceTimerState.pollInterval = setInterval(pollRaceTimer, RACE_POLL_MS);
 }
 
 function updateRaceTimer() {
@@ -2986,6 +3004,10 @@ function disconnectRaceTimer() {
   if (raceTimerState.interval) {
     clearInterval(raceTimerState.interval);
     raceTimerState.interval = null;
+  }
+  if (raceTimerState.pollInterval) {
+    clearInterval(raceTimerState.pollInterval);
+    raceTimerState.pollInterval = null;
   }
   document.getElementById('race-timer').classList.remove('visible');
   document.getElementById('racetime-status').textContent = 'Not connected';
