@@ -1060,12 +1060,16 @@ function updateAllPanelDOM() {
       entry.textEl.style.background = p.textBgTransparent ? 'transparent' : (p.textBg || '#000000');
     }
 
-    // Stream panel — resize the player iframe if it exists
-    if (entry.player && entry.player.getIframe) {
+    // Stream panel — only resize the player iframe when w/h actually changed.
+    // Re-applying the same width/height attributes on a Twitch.Player iframe
+    // every drag/zoom tick causes it to internally reset and pause the video.
+    if (entry.player && entry.player.getIframe && (entry.iframeW !== p.w || entry.iframeH !== p.h)) {
       const iframe = entry.player.getIframe();
       if (iframe) {
         iframe.width = p.w;
         iframe.height = p.h;
+        entry.iframeW = p.w;
+        entry.iframeH = p.h;
       }
     }
 
