@@ -917,6 +917,20 @@ function syncCanvasDOM() {
           height: panel.h,
         });
         entry.player = player;
+        // When the player finishes initializing, apply the saved audio state —
+        // unmute this one if it matches the active audio panel, mute otherwise.
+        player.addEventListener(Twitch.Player.READY, () => {
+          const shouldUnmute = (panel.id === audioActiveId);
+          try {
+            player.setMuted(!shouldUnmute);
+            if (shouldUnmute) player.setVolume(1.0);
+          } catch (e) {}
+          if (entry.audioBtn) {
+            entry.audioBtn.classList.toggle('active', shouldUnmute);
+            entry.audioBtn.innerHTML = shouldUnmute ? '&#x1f50a;' : '&#x1f507;';
+            entry.audioBtn.title = shouldUnmute ? 'Click to mute' : 'Click to unmute this stream';
+          }
+        });
       } catch (e) {
         const target = document.getElementById('tp-' + panel.id);
         if (target) {
@@ -1731,6 +1745,7 @@ function getConfig() {
     frameLayer: frameLayer || null,
     timerLayer: raceTimerState.layer || null,
     cloudURL: cloudURL || '',
+    audioChannel: (panels.find(p => p.id === audioActiveId)?.channel) || '',
   };
 }
 
@@ -1845,6 +1860,13 @@ function loadConfig() {
     cloudURL = config.cloudURL;
     const el = document.getElementById('cloud-url');
     if (el) el.value = cloudURL;
+  }
+
+  // Restore which panel owns audio — picked up by the player READY handler.
+  audioActiveId = null;
+  if (config.audioChannel) {
+    const audioPanel = panels.find(p => p.channel === config.audioChannel);
+    if (audioPanel) audioActiveId = audioPanel.id;
   }
 
   renderAll();
@@ -2819,6 +2841,14 @@ function applyConfig(config, user) {
   // Restore frame URL
   if (config.frameURL) loadFrameFromURL(config.frameURL);
   else if (!config.frameURL) removeFrameImage();
+
+  // Restore which panel owns audio — set BEFORE renderAll so the player READY
+  // handler picks it up as each Twitch.Player finishes initializing.
+  audioActiveId = null;
+  if (config.audioChannel) {
+    const audioPanel = panels.find(p => p.channel === config.audioChannel);
+    if (audioPanel) audioActiveId = audioPanel.id;
+  }
 
   renderAll();
   saveConfig();
