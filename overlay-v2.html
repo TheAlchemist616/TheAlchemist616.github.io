@@ -2894,7 +2894,9 @@ function connectRaceTimer() {
   updateRaceTimer();
   saveConfig();
 
-  fetch(`https://racetime.gg/${room}/data`)
+  // Cache-bust both query string and HTTP cache — without this, !timer hits
+  // the browser's cached response and never sees the race actually starting.
+  fetch(`https://racetime.gg/${room}/data?t=${Date.now()}`, { cache: 'no-store' })
     .then(r => {
       if (!r.ok) throw new Error('Race not found');
       return r.json();
