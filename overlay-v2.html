@@ -2396,6 +2396,8 @@ let chatState = {
   socket: null,
   channel: '',
   connected: false,
+  reconnectTimer: null,
+  reconnectDelay: 1000, // exponential backoff, resets on successful connect
 };
 
 function connectChat() {
@@ -2403,7 +2405,19 @@ function connectChat() {
   if (!channel) return;
   channel = channel.replace(/^#/, '');
 
-  disconnectChat();
+  // Cancel any pending reconnect and drop the previous socket without
+  // signaling "user wants to disconnect" (which would kill auto-reconnect).
+  if (chatState.reconnectTimer) {
+    clearTimeout(chatState.reconnectTimer);
+    chatState.reconnectTimer = null;
+  }
+  if (chatState.socket) {
+    const oldWs = chatState.socket;
+    chatState.socket = null;
+    try { oldWs.close(); } catch (e) {}
+  }
+  chatState.connected = false;
+  chatState.channel = channel;
 
   const statusEl = document.getElementById('chat-status');
   statusEl.textContent = 'Connecting...';
@@ -2411,7 +2425,6 @@ function connectChat() {
 
   const ws = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
   chatState.socket = ws;
-  chatState.channel = channel;
 
   ws.onopen = () => {
     // Anonymous login — justinfan<random>
@@ -2423,6 +2436,7 @@ function connectChat() {
     statusEl.textContent = 'Connected to #' + channel;
     statusEl.style.color = '#0f0';
     chatState.connected = true;
+    chatState.reconnectDelay = 1000; // successful connect, reset backoff
     saveConfig();
   };
 
@@ -2447,19 +2461,42 @@ function connectChat() {
   };
 
   ws.onclose = () => {
-    if (chatState.connected) {
+    // Ignore close events from a socket we already replaced.
+    if (chatState.socket !== ws) return;
+    chatState.socket = null;
+    chatState.connected = false;
+    // Empty channel means user hit Disconnect — do not auto-reconnect.
+    if (!chatState.channel) {
       statusEl.textContent = 'Disconnected';
       statusEl.style.color = '#888';
+      return;
     }
-    chatState.connected = false;
+    // Exponential backoff, capped at 30s. Twitch IRC drops need to reconnect
+    // on their own so !reload / !sync / etc keep working without operator
+    // intervention.
+    const delay = Math.min(30000, chatState.reconnectDelay || 1000);
+    statusEl.textContent = 'Disconnected — reconnect in ' + Math.round(delay / 1000) + 's';
+    statusEl.style.color = '#fa0';
+    chatState.reconnectTimer = setTimeout(() => {
+      chatState.reconnectTimer = null;
+      chatState.reconnectDelay = Math.min(30000, (chatState.reconnectDelay || 1000) * 2);
+      connectChat();
+    }, delay);
   };
 }
 
 function disconnectChat() {
-  if (chatState.socket) {
-    try { chatState.socket.close(); } catch (e) {}
+  if (chatState.reconnectTimer) {
+    clearTimeout(chatState.reconnectTimer);
+    chatState.reconnectTimer = null;
   }
-  chatState.socket = null;
+  chatState.channel = ''; // signals close handler: do not auto-reconnect
+  chatState.reconnectDelay = 1000;
+  if (chatState.socket) {
+    const s = chatState.socket;
+    chatState.socket = null;
+    try { s.close(); } catch (e) {}
+  }
   chatState.connected = false;
   const statusEl = document.getElementById('chat-status');
   if (statusEl) {
