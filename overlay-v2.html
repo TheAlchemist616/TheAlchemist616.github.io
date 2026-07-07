@@ -2685,18 +2685,32 @@ function handleCommand(user, msg) {
       break;
     }
     case 'timer': {
-      const room = args[0] || '';
-      const lower = room.toLowerCase();
+      const arg = args[0] || '';
+      const lower = arg.toLowerCase();
       if (lower === 'off' || lower === 'remove' || lower === 'clear') {
         disconnectRaceTimer();
         showToast(`[${user}] Timer removed`);
-      } else if (room) {
-        document.getElementById('racetime-url').value = room;
+      } else if (arg) {
+        document.getElementById('racetime-url').value = arg;
         connectRaceTimer();
-        showToast(`[${user}] Timer: ${room}`);
+        showToast(`[${user}] Timer: ${arg}`);
       } else {
-        // No arg: re-fetch current room (refreshes data without reloading overlay)
-        connectRaceTimer();
+        // No arg: full forced refresh. Capture the room, tear the timer down
+        // to a bare DOM element with no state / no intervals / no styles /
+        // no classes, then rebuild from scratch. No amount of stale state or
+        // stuck interval can survive this.
+        const room = raceTimerState.room
+          || document.getElementById('racetime-url').value.trim();
+        disconnectRaceTimer();
+        const timerEl = document.getElementById('race-timer');
+        timerEl.className = '';
+        timerEl.removeAttribute('style');
+        timerEl.innerHTML = '';
+        if (room) {
+          document.getElementById('racetime-url').value = room;
+          updateTimerStyle();
+          connectRaceTimer();
+        }
         showToast(`[${user}] Timer refreshed`);
       }
       break;
