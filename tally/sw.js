@@ -22,6 +22,9 @@ self.addEventListener("push", event => {
       body,
       tag: channel ? `tally-${channel}` : "tally",
       renotify: true,
+      silent: false,
+      vibrate: [200, 100, 200, 100, 300],
+      requireInteraction: true,
       data: { url },
     })
   );
