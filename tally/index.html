@@ -214,12 +214,7 @@
     </header>
 
     <section class="notif">
-      <div class="notif-row">
-        <button id="notifBtn" type="button">Turn on notifications</button>
-        <button id="testBtn" type="button" class="ghost">Send test</button>
-        <span id="permNote" class="perm-note"></span>
-      </div>
-      <div class="notif-row" id="bgRow" style="margin-top:10px; display:none;">
+      <div class="notif-row" id="bgRow" style="display:none;">
         <button id="bgBtn" type="button">Enable background alerts</button>
         <span id="bgNote" class="perm-note"></span>
       </div>
@@ -237,8 +232,8 @@
     <section id="board" class="board" aria-live="polite"></section>
 
     <footer class="foot">
-      Keep this tab open — checks pause when it's closed.<br>
-      Checking every <span id="ivl"></span>s · live data via <a href="https://decapi.me" target="_blank" rel="noopener">decapi.me</a>
+      Turn on alerts to be notified the moment a channel goes live — even with this tab closed.<br>
+      Live status via <a href="https://decapi.me" target="_blank" rel="noopener">decapi.me</a>
     </footer>
   </main>
 
@@ -259,7 +254,6 @@
   //   VAPID_PUBLIC_KEY – printed by `vapid --applicationServerKey`
   const PUSH_SERVER = "https://lunc-validator.tailc84898.ts.net";
   const VAPID_PUBLIC_KEY = "BIg2Z9N7tx-pgQxHvM1xuCoVEaC94VOTrwxMh1BuY8UIgGDfVFlBMZ_LdgMT5uT40r11nsu_O6wsFPWn7httkY8";
-  let pushActive = false;   // true once this browser holds a push subscription
 
   const API = name => `https://decapi.me/twitch/uptime/${encodeURIComponent(name)}`;
 
@@ -314,14 +308,11 @@
       const res = await fetch(API(name), { cache: "no-store" });
       const text = await res.text();
       const { status, detail } = classify(text);
-      const wentLive = status === "live" && !rec.wasLive;
       rec.status = status;
       rec.detail = status === "error"
         ? (detail.length > 60 ? "channel not found — check the name" : detail)
         : detail;
       rec.checkedAt = new Date();
-      if (wentLive) notifyLive(name, detail);
-      rec.wasLive = status === "live";
     } catch {
       rec.status = "error";
       rec.detail = "couldn't reach the status service";
@@ -331,41 +322,6 @@
   }
 
   function pollAll() { for (const name of state.keys()) pollOne(name); }
-
-  // ---- notifications
-  function notifyLive(name, detail) {
-    if (pushActive) return;  // background push owns alerts when it's on
-    if (!("Notification" in window) || Notification.permission !== "granted") return;
-    const n = new Notification(`${name} is live`, {
-      body: detail ? `up ${detail}` : "stream just started",
-      tag: `tally-${name}`,
-      renotify: true,
-    });
-    n.onclick = () => {
-      window.open(`https://twitch.tv/${name}`, "_blank", "noopener");
-      window.focus();
-      n.close();
-    };
-  }
-
-  function updatePermUI() {
-    const note = el("permNote"), btn = el("notifBtn");
-    if (!("Notification" in window)) {
-      btn.disabled = true;
-      note.textContent = "this browser can't show notifications";
-      note.className = "perm-note warn";
-      return;
-    }
-    const p = Notification.permission;
-    if (p === "granted") { btn.textContent = "Notifications on"; btn.disabled = true; note.textContent = ""; }
-    else if (p === "denied") {
-      note.textContent = "blocked — allow them in your browser's site settings";
-      note.className = "perm-note warn";
-    } else {
-      note.textContent = "off — you'll only see status on this page while it's open";
-      note.className = "perm-note";
-    }
-  }
 
   // ---- channel management
   function addChannel(raw) {
@@ -398,8 +354,8 @@
     if (state.size === 0) {
       board.innerHTML = `<div class="empty">
         <div class="empty-lead">Add the Twitch channels you want to watch.</div>
-        This board lights up and notifies you the moment any of them goes live.
-        Turn on notifications, keep the tab open, and it keeps checking.
+        This board lights up when any of them goes live. Turn on alerts to get a
+        notification the moment it happens — even when this tab is closed.
       </div>`;
       return;
     }
@@ -438,21 +394,6 @@
   el("addBtn").addEventListener("click", () => { addChannel(el("chanInput").value); el("chanInput").value = ""; el("chanInput").focus(); syncSubscription(); });
   el("chanInput").addEventListener("keydown", e => {
     if (e.key === "Enter") { addChannel(el("chanInput").value); el("chanInput").value = ""; syncSubscription(); }
-  });
-
-  el("notifBtn").addEventListener("click", async () => {
-    if (!("Notification" in window)) return;
-    await Notification.requestPermission();
-    updatePermUI();
-  });
-  el("testBtn").addEventListener("click", () => {
-    if (!("Notification" in window) || Notification.permission !== "granted") {
-      el("permNote").textContent = "turn on notifications first";
-      el("permNote").className = "perm-note warn";
-      return;
-    }
-    const n = new Notification("Tally test", { body: "notifications are working", tag: "tally-test", renotify: true });
-    setTimeout(() => n.close(), 4000);
   });
 
   el("shareBtn").addEventListener("click", async () => {
@@ -507,9 +448,8 @@
     if (!pushSupported()) return;
     try {
       if (await Notification.requestPermission() !== "granted") {
-        note.textContent = "allow notifications to enable background alerts";
+        note.textContent = "allow notifications in your browser to get alerts";
         note.className = "perm-note warn";
-        updatePermUI();
         return;
       }
       const reg = await navigator.serviceWorker.register("sw.js");
@@ -520,7 +460,6 @@
       });
       const res = await postJSON("/subscribe", { subscription: sub, channels: [...state.keys()] });
       if (!res.ok) throw new Error("server " + res.status);
-      updatePermUI();
     } catch (e) {
       note.textContent = "couldn't enable — " + (e.message || "check the poller URL");
       note.className = "perm-note warn";
@@ -539,32 +478,29 @@
 
   async function updatePushUI() {
     const row = el("bgRow"), btn = el("bgBtn"), note = el("bgNote");
-    if (!pushConfigured()) { row.style.display = "none"; pushActive = false; return; }
+    if (!pushConfigured()) { row.style.display = "none"; return; }
     row.style.display = "";
     if (!pushSupported()) {
-      btn.disabled = true; pushActive = false;
-      note.textContent = "this browser can't do background push";
+      btn.disabled = true;
+      note.textContent = "this browser can't show background notifications";
       note.className = "perm-note warn";
       return;
     }
     const sub = await currentSubscription();
-    pushActive = Boolean(sub);
     if (sub) {
       btn.textContent = "Background alerts on"; btn.classList.add("ghost");
-      note.textContent = "fires with this tab closed · click to turn off";
+      note.textContent = "you're alerted even with this tab closed · click to turn off";
       note.className = "perm-note";
       btn.onclick = disablePush;
     } else {
       btn.textContent = "Enable background alerts"; btn.classList.remove("ghost");
-      note.textContent = "get alerts when the tab is closed";
+      note.textContent = "get notified when a channel goes live, even with this tab closed";
       note.className = "perm-note";
       btn.onclick = enablePush;
     }
   }
 
   // ---- boot: merge this device's saved list with any list from a shared URL
-  el("ivl").textContent = POLL_SECONDS;
-  updatePermUI();
   updatePushUI();
   [...new Set([...loadSaved(), ...importFromURL()])].forEach(addChannel);
   if (location.search) history.replaceState(null, "", location.origin + location.pathname);
