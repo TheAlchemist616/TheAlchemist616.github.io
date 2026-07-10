@@ -4,6 +4,12 @@
 // it in the GitHub Pages repo root). It runs even when the Tally tab is closed;
 // the browser wakes it only when a push arrives.
 
+// Take over as soon as an updated worker is deployed, so notification changes
+// (sound/vibration) apply on the next page load instead of waiting for all tabs
+// to close.
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", event => event.waitUntil(self.clients.claim()));
+
 self.addEventListener("push", event => {
   let data = {};
   try {
