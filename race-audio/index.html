@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Race Audio test</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0e0e10;
+    --panel: #18181b;
+    --line: #2a2a2e;
+    --text: #efeff1;
+    --dim: #adadb8;
+    --accent: #a970ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 1.25rem; margin: 0 0 4px; }
+  p.lede { color: var(--dim); margin: 0 0 16px; }
+  /* Stands in for the Twitch player the extension normally sits on. */
+  .stage {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background:
+      linear-gradient(135deg, #1d2b4a, #241d4a) left / 50% 100% no-repeat,
+      linear-gradient(135deg, #3a1d4a, #4a1d33) right / 50% 100% no-repeat;
+  }
+  .stage .label {
+    position: absolute;
+    bottom: 8px;
+    font-size: 0.75rem;
+    color: #ffffff66;
+  }
+  .stage .label.left { left: 10px; }
+  .stage .label.right { right: 10px; }
+  .stage iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+  }
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    margin: 14px 0;
+  }
+  label { color: var(--dim); font-size: 0.9rem; display: flex; gap: 6px; align-items: center; }
+  .card {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-top: 16px;
+  }
+  .card h2 { font-size: 0.95rem; margin: 0 0 8px; }
+  .card ol { margin: 0; padding-left: 20px; color: var(--dim); }
+  .card li { margin-bottom: 6px; }
+  code { background: #ffffff14; padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Race Audio — test page</h1>
+  <p class="lede">
+    The overlay below is the real Twitch extension, running on a fake stream.
+    Tap a runner to hear only them.
+  </p>
+
+  <div class="stage">
+    <span class="label left">runner 1</span>
+    <span class="label right">runner 2</span>
+    <iframe id="overlay" src="viewer.html" title="Race Audio overlay" allow="autoplay"></iframe>
+  </div>
+
+  <div class="row">
+    <label><input type="checkbox" id="delay"> simulate Twitch's 3.5 s delay</label>
+  </div>
+
+  <div class="card">
+    <h2>What to expect</h2>
+    <ol>
+      <li>Tap <b>runner 1</b>: a steady low tone (440 Hz), nothing else.</li>
+      <li>Tap <b>runner 2</b>: a higher tone (880 Hz). The first one stops.</li>
+      <li>Tap the headphones button for the mixer: commentary is a lower tone
+        again (220 Hz), and each slider should change only its own runner.</li>
+      <li>Silence with the chips lit means the feeds have expired — they are test
+        tones, not a live race.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Why this page exists</h2>
+    <ol>
+      <li>On your phone with wifi <b>off</b>, this proves audio reaches a viewer
+        from outside the house — the part a test from indoors cannot show.</li>
+      <li>Relay: <code>race.luncearnnburn.com</code>. Reading feeds is open;
+        publishing needs a password.</li>
+    </ol>
+  </div>
+</main>
+
+<script>
+  // Play the part of the Twitch player. Default to no added delay so a tap is
+  // answered immediately; the checkbox puts the real broadcast delay back.
+  (function () {
+    const overlay = document.getElementById('overlay');
+    const delay = document.getElementById('delay');
+
+    function push() {
+      overlay.contentWindow.postMessage({
+        type: 'dev-context',
+        context: {
+          arePlayerControlsVisible: true,
+          isMuted: true,
+          isPaused: false,
+          volume: 0.5,
+          hlsLatencyBroadcaster: delay.checked ? 3.5 : 0.8,
+          theme: 'dark',
+        },
+      }, '*');
+    }
+
+    delay.addEventListener('change', push);
+    window.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'dev-ready' && e.source === overlay.contentWindow) push();
+    });
+  })();
+</script>
+</body>
+</html>
