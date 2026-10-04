@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your Mix — Privacy Notice</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0 auto;
+    padding: 32px 20px 64px;
+    max-width: 44rem;
+    background: #0e0e10;
+    color: #e8e8ea;
+    font: 16px/1.65 -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  h1 { font-size: 1.7rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 32px 0 8px; }
+  .date { color: #a0a0a8; margin: 0 0 28px; }
+  ul { padding-left: 1.2rem; }
+  li { margin: 6px 0; }
+  code { background: #1c1c20; padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+  a { color: #a98bff; }
+  .note { color: #a0a0a8; font-size: 0.95rem; }
+</style>
+</head>
+<body>
+
+<h1>Your Mix — Privacy Notice</h1>
+<p class="date">Last updated 4 October 2026</p>
+
+<p>Your Mix is a Twitch Extension that lets you choose which audio from a
+stream you hear, and at what volume — the streamer's voice, the game, the
+alerts, or each runner in a race — and balance them yourself.</p>
+
+<p>It is deliberately simple about data: listening requires no account, no
+sign-in and no identifier of any kind.</p>
+
+<h2>What is sent when you listen</h2>
+<p>When you turn a slider above zero, your browser opens a direct audio
+connection to the relay that carries the stream's audio feeds
+(<code>mix.luncearnnburn.com</code>). That request contains only the technical
+details needed to set up the connection. No Twitch username, user ID or token
+is sent, and the relay has no way to tell one listener from another.</p>
+<p>As with any server you connect to, the relay necessarily receives your IP
+address in order to send audio back to you.</p>
+
+<h2>What is sent if you are a broadcaster or moderator</h2>
+<p>If you are the broadcaster of the channel, or one of its moderators, and you
+open the control panel, the extension sends the signed token that Twitch issues
+to the extension so the relay can confirm you are allowed to make changes. That
+token is issued by Twitch and identifies you only by an opaque ID, not by name
+or email. It is used to check permission for that action and nothing else.</p>
+
+<h2>What is stored on your device</h2>
+<p>One setting: your audio sync offset, remembered separately for each channel
+so you do not have to set it again. It is kept in your browser's local storage,
+it never leaves your device, and clearing your browser data removes it.</p>
+
+<h2>What this extension does not do</h2>
+<ul>
+  <li>No analytics, tracking pixels, fingerprinting or advertising.</li>
+  <li>No cookies.</li>
+  <li>No microphone, camera or location access.</li>
+  <li>No personal information is collected, sold, rented or shared.</li>
+  <li>No profiles are built about you, and nothing is linked to your Twitch identity.</li>
+</ul>
+
+<h2>Logs</h2>
+<p>The relay keeps ordinary server logs of connections, which include IP
+addresses, for a short time so that faults can be diagnosed. They are not used
+to identify or profile anyone, and are not shared with third parties.</p>
+
+<h2>Twitch</h2>
+<p>The extension runs inside Twitch and loads Twitch's own extension helper
+script. Anything Twitch itself collects is covered by
+<a href="https://www.twitch.tv/p/legal/privacy-notice/">Twitch's privacy
+notice</a>, not this one.</p>
+
+<h2>Children</h2>
+<p>Your Mix is not directed at children and collects no information from
+anyone, including children.</p>
+
+<h2>Changes</h2>
+<p>If this notice changes, the date at the top changes with it.</p>
+
+<h2>Contact</h2>
+<p>Questions about this notice: <a href="mailto:josephmorris616@yahoo.com">josephmorris616@yahoo.com</a></p>
+
+</body>
+</html>
