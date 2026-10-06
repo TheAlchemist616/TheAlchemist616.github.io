@@ -611,8 +611,9 @@
       <code>!settext &lt;slot#&gt; &lt;text&gt;</code> — update text<br>
       <code>!zoom &lt;channel&gt; &lt;1-8&gt;</code><br>
       <code>!pan &lt;channel&gt; &lt;x%&gt; &lt;y%&gt;</code><br>
-      <code>!timer &lt;category/room&gt;</code> — racetime 1 (<code>!timer</code> refreshes, <code>!timer off</code> removes)<br>
-      <code>!timer2 &lt;category/room&gt;</code> — racetime 2 (same semantics as !timer)<br>
+      <code>!timer &lt;category/room&gt;</code> — set racetime 1 (<code>!timer off</code> removes it)<br>
+      <code>!timer2 &lt;category/room&gt;</code> — set racetime 2 (<code>!timer2 off</code> removes it)<br>
+      <code>!timer</code> — force-refresh BOTH clocks (unstick the display)<br>
       <code>!frame &lt;url&gt;</code> — load frame image<br>
       <code>!frame off</code> — remove frame<br>
       <code>!config &lt;url/hash&gt;</code> — load full config<br>
@@ -2878,23 +2879,37 @@ function handleCommand(user, msg) {
         connectRaceTimer();
         showToast(`[${user}] Timer 1: ${arg}`);
       } else {
-        // No arg: full forced refresh. Capture the room, tear the timer down
-        // to a bare DOM element with no state / no intervals / no styles /
-        // no classes, then rebuild from scratch. No amount of stale state or
-        // stuck interval can survive this.
-        const room = raceTimerState.room
+        // No arg: full forced refresh of BOTH timers. The command exists for
+        // "something's stuck, unstick it" moments; with two clocks it must
+        // reach both or the operator has to type a second command for the
+        // one that is actually broken. Each timer is captured, torn down to
+        // a bare DOM element (no state / no intervals / no classes / no
+        // inline styles), then rebuilt from its own saved room.
+        const room1 = raceTimerState.room
           || document.getElementById('racetime-url').value.trim();
         disconnectRaceTimer();
-        const timerEl = document.getElementById('race-timer');
-        timerEl.className = '';
-        timerEl.removeAttribute('style');
-        timerEl.innerHTML = '';
-        if (room) {
-          document.getElementById('racetime-url').value = room;
+        const timerEl1 = document.getElementById('race-timer');
+        timerEl1.className = '';
+        timerEl1.removeAttribute('style');
+        timerEl1.innerHTML = '';
+        if (room1) {
+          document.getElementById('racetime-url').value = room1;
           updateTimerStyle();
           connectRaceTimer();
         }
-        showToast(`[${user}] Timer 1 refreshed`);
+        const room2 = raceTimerState2.room
+          || document.getElementById('racetime-url-2').value.trim();
+        disconnectRaceTimer2();
+        const timerEl2 = document.getElementById('race-timer-2');
+        timerEl2.className = '';
+        timerEl2.removeAttribute('style');
+        timerEl2.innerHTML = '';
+        if (room2) {
+          document.getElementById('racetime-url-2').value = room2;
+          updateTimerStyle2();
+          connectRaceTimer2();
+        }
+        showToast(`[${user}] Timers refreshed`);
       }
       break;
     }
