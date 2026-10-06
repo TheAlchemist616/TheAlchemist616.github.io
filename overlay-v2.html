@@ -76,6 +76,8 @@
   .panel.layer-back { z-index: 10 !important; }
   #race-timer.layer-front { z-index: 999 !important; }
   #race-timer.layer-back { z-index: 1 !important; }
+  #race-timer-2.layer-front { z-index: 999 !important; }
+  #race-timer-2.layer-back { z-index: 1 !important; }
 
   /* Corner markers */
   #canvas::before, #canvas::after {
@@ -253,6 +255,31 @@
     border: 2px solid #00d4ff;
   }
   #race-timer .timer-small {
+    font-size: 32px;
+    opacity: 0.6;
+  }
+
+  /* Second race timer — same shape, defaults set in CSS and JS state */
+  #race-timer-2 {
+    display: none;
+    position: absolute;
+    background: rgba(0, 0, 0, 0.85);
+    color: #ff6ec7;
+    font-family: 'Courier New', monospace;
+    font-size: 48px;
+    font-weight: 700;
+    padding: 8px 20px;
+    border-radius: 6px;
+    z-index: 999;
+    pointer-events: none;
+    letter-spacing: 2px;
+    text-shadow: 0 0 10px rgba(255, 110, 199, 0.3);
+  }
+  #race-timer-2.visible { display: block; pointer-events: auto; cursor: move; }
+  body.edit-mode #race-timer-2.visible {
+    border: 2px solid #ff6ec7;
+  }
+  #race-timer-2 .timer-small {
     font-size: 32px;
     opacity: 0.6;
   }
@@ -482,6 +509,7 @@
 <div id="canvas">
   <img id="frame-image" src="" alt="">
   <div id="race-timer"></div>
+  <div id="race-timer-2"></div>
   <div id="canvas-label">1920 x 1080</div>
 </div>
 
@@ -583,7 +611,8 @@
       <code>!settext &lt;slot#&gt; &lt;text&gt;</code> — update text<br>
       <code>!zoom &lt;channel&gt; &lt;1-8&gt;</code><br>
       <code>!pan &lt;channel&gt; &lt;x%&gt; &lt;y%&gt;</code><br>
-      <code>!timer &lt;category/room&gt;</code> — racetime (<code>!timer</code> refreshes, <code>!timer off</code> removes)<br>
+      <code>!timer &lt;category/room&gt;</code> — racetime 1 (<code>!timer</code> refreshes, <code>!timer off</code> removes)<br>
+      <code>!timer2 &lt;category/room&gt;</code> — racetime 2 (same semantics as !timer)<br>
       <code>!frame &lt;url&gt;</code> — load frame image<br>
       <code>!frame off</code> — remove frame<br>
       <code>!config &lt;url/hash&gt;</code> — load full config<br>
@@ -593,7 +622,7 @@
   </div>
 
   <div class="sidebar-section">
-    <h3>Racetime.gg Timer</h3>
+    <h3>Racetime.gg Timer 1</h3>
     <div class="sidebar-row">
       <input type="text" id="racetime-url" placeholder="e.g. alttp/dazzling-dedede-1908">
     </div>
@@ -635,6 +664,51 @@
       <button class="btn btn-sm" onclick="setTimerLayer('back')">Back</button>
     </div>
     <div id="racetime-status" style="font-size:11px; color:#666; margin-top:4px;">Not connected</div>
+  </div>
+
+  <div class="sidebar-section">
+    <h3>Racetime.gg Timer 2</h3>
+    <div class="sidebar-row">
+      <input type="text" id="racetime-url-2" placeholder="e.g. smz3/witty-whomp-4242">
+    </div>
+    <div class="sidebar-row" style="gap:4px;">
+      <button class="btn btn-sm btn-primary" onclick="connectRaceTimer2()">Connect</button>
+      <button class="btn btn-sm btn-danger" onclick="disconnectRaceTimer2()">Remove</button>
+    </div>
+    <div class="sidebar-row">
+      <label>Font</label>
+      <select id="timer2-font" onchange="updateTimerStyle2()">
+        <option value="'Courier New', monospace">Courier New</option>
+        <option value="'Roboto Mono', monospace">Roboto Mono</option>
+        <option value="'Orbitron', sans-serif">Orbitron</option>
+        <option value="'Press Start 2P', monospace">Press Start 2P</option>
+        <option value="'Segment7', monospace">Segment7 (LED)</option>
+        <option value="Impact, sans-serif">Impact</option>
+        <option value="'Arial Black', sans-serif">Arial Black</option>
+        <option value="'Trebuchet MS', sans-serif">Trebuchet MS</option>
+      </select>
+    </div>
+    <div class="sidebar-row">
+      <label>Size</label>
+      <input type="range" id="timer2-size" min="20" max="120" value="48" oninput="updateTimerStyle2()">
+      <span id="timer2-size-val" style="min-width:35px;text-align:right;">48px</span>
+    </div>
+    <div class="sidebar-row">
+      <label>Color</label>
+      <input type="color" id="timer2-color" value="#ff6ec7" oninput="updateTimerStyle2()" style="width:40px;height:28px;padding:0;border:none;cursor:pointer;">
+      <label>BG</label>
+      <input type="color" id="timer2-bg" value="#000000" oninput="updateTimerStyle2()" style="width:40px;height:28px;padding:0;border:none;cursor:pointer;">
+      <label style="min-width:auto;">
+        <input type="checkbox" id="timer2-bg-transparent" onchange="updateTimerStyle2()"> None
+      </label>
+    </div>
+    <div class="sidebar-row" style="margin-top:4px;">
+      <label style="min-width:40px;">Layer</label>
+      <button class="btn btn-sm" onclick="setTimer2Layer('front')">Front</button>
+      <button class="btn btn-sm" onclick="setTimer2Layer('normal')">Normal</button>
+      <button class="btn btn-sm" onclick="setTimer2Layer('back')">Back</button>
+    </div>
+    <div id="racetime-status-2" style="font-size:11px; color:#666; margin-top:4px;">Not connected</div>
   </div>
 
   <div class="sidebar-section">
@@ -1602,7 +1676,16 @@ function setTimerLayer(layer) {
   raceTimerState.layer = (layer === 'normal') ? null : layer;
   if (raceTimerState.layer) el.classList.add('layer-' + raceTimerState.layer);
   saveConfig();
-  showToast(`Timer layer: ${layer}`);
+  showToast(`Timer 1 layer: ${layer}`);
+}
+
+function setTimer2Layer(layer) {
+  const el = document.getElementById('race-timer-2');
+  el.classList.remove('layer-front', 'layer-back');
+  raceTimerState2.layer = (layer === 'normal') ? null : layer;
+  if (raceTimerState2.layer) el.classList.add('layer-' + raceTimerState2.layer);
+  saveConfig();
+  showToast(`Timer 2 layer: ${layer}`);
 }
 
 function copyAllToAll() {
@@ -1748,6 +1831,17 @@ function getConfig() {
     frameURL: frameURL || '',
     frameLayer: frameLayer || null,
     timerLayer: raceTimerState.layer || null,
+    timer2: {
+      room: raceTimerState2.room || '',
+      x: raceTimerState2.x,
+      y: raceTimerState2.y,
+      font: raceTimerState2.font || "'Courier New', monospace",
+      size: raceTimerState2.size || 48,
+      color: raceTimerState2.color || '#ff6ec7',
+      bg: raceTimerState2.bg || '#000000',
+      bgTransparent: raceTimerState2.bgTransparent || false,
+    },
+    timer2Layer: raceTimerState2.layer || null,
     cloudURL: cloudURL || '',
     audioChannel: (panels.find(p => p.id === audioActiveId)?.channel) || '',
   };
@@ -1761,9 +1855,14 @@ function saveConfig() {
 
 function loadConfig() {
   // Priority: ?c= query > URL hash > localStorage > default
+  // trusted = the config came from the operator's own machine (localStorage),
+  // so it is safe to auto-connect side effects like Twitch chat. A ?c= or
+  // #hash config is a shared import — a chat command or someone else's URL —
+  // and must NOT silently join a chat channel on their behalf.
   const cParam = new URLSearchParams(window.location.search).get('c');
   const hash = window.location.hash.slice(1);
   let config = null;
+  let trusted = false;
 
   if (cParam) {
     try {
@@ -1780,7 +1879,7 @@ function loadConfig() {
   if (!config) {
     try {
       const stored = localStorage.getItem('overlay-config');
-      if (stored) config = JSON.parse(stored);
+      if (stored) { config = JSON.parse(stored); trusted = true; }
     } catch (e) {}
   }
 
@@ -1843,10 +1942,44 @@ function loadConfig() {
     updateTimerStyle();
   }
 
-  // Restore chat channel (don't auto-connect for safety)
+  // Restore chat channel. Auto-connect only when the config came from the
+  // operator's own machine — a shared ?c= / #hash import is not allowed to
+  // silently join a Twitch chat for the person who opened it.
   if (config.chat && config.chat.channel) {
     const el = document.getElementById('chat-channel');
     if (el) el.value = config.chat.channel;
+    if (trusted) setTimeout(() => connectChat(), 500);
+  }
+
+  // Restore timer 2 if saved
+  if (config.timer2) {
+    raceTimerState2.x = config.timer2.x || 760;
+    raceTimerState2.y = config.timer2.y || 620;
+    if (config.timer2.font) {
+      raceTimerState2.font = config.timer2.font;
+      document.getElementById('timer2-font').value = config.timer2.font;
+    }
+    if (config.timer2.size) {
+      raceTimerState2.size = config.timer2.size;
+      document.getElementById('timer2-size').value = config.timer2.size;
+    }
+    if (config.timer2.color) {
+      raceTimerState2.color = config.timer2.color;
+      document.getElementById('timer2-color').value = config.timer2.color;
+    }
+    if (config.timer2.bg) {
+      raceTimerState2.bg = config.timer2.bg;
+      document.getElementById('timer2-bg').value = config.timer2.bg;
+    }
+    if (config.timer2.bgTransparent) {
+      raceTimerState2.bgTransparent = config.timer2.bgTransparent;
+      document.getElementById('timer2-bg-transparent').checked = true;
+    }
+    if (config.timer2.room) {
+      document.getElementById('racetime-url-2').value = config.timer2.room;
+      connectRaceTimer2();
+    }
+    updateTimerStyle2();
   }
 
   // Restore frame from URL
@@ -1858,6 +1991,9 @@ function loadConfig() {
   }
   if (config.timerLayer) {
     setTimerLayer(config.timerLayer);
+  }
+  if (config.timer2Layer) {
+    setTimer2Layer(config.timer2Layer);
   }
   // Restore streamer blob ID so Push Update works after reload
   if (config.cloudURL) {
@@ -2263,6 +2399,16 @@ function loadFromCloud(url, isReload) {
     const cloudInput = document.getElementById('cloud-url');
     if (cloudInput) cloudInput.value = url;
     applyConfig(config, isReload ? 'reload' : 'load');
+    // Cloud configs come from the operator's own gist / config URL, so chat
+    // auto-connect is safe here (unlike ?c= / #hash shared imports, which
+    // applyConfig deliberately does not touch). Without this, OBS browser
+    // sources load the overlay with chat silently disconnected and every
+    // chat command is a no-op until the operator clicks Connect by hand.
+    if (config.chat && config.chat.channel) {
+      const el = document.getElementById('chat-channel');
+      if (el) el.value = config.chat.channel;
+      setTimeout(() => connectChat(), 500);
+    }
     if (statusEl) {
       statusEl.textContent = 'Loaded from cloud';
       statusEl.style.color = '#0f0';
@@ -2726,11 +2872,11 @@ function handleCommand(user, msg) {
       const lower = arg.toLowerCase();
       if (lower === 'off' || lower === 'remove' || lower === 'clear') {
         disconnectRaceTimer();
-        showToast(`[${user}] Timer removed`);
+        showToast(`[${user}] Timer 1 removed`);
       } else if (arg) {
         document.getElementById('racetime-url').value = arg;
         connectRaceTimer();
-        showToast(`[${user}] Timer: ${arg}`);
+        showToast(`[${user}] Timer 1: ${arg}`);
       } else {
         // No arg: full forced refresh. Capture the room, tear the timer down
         // to a bare DOM element with no state / no intervals / no styles /
@@ -2748,7 +2894,35 @@ function handleCommand(user, msg) {
           updateTimerStyle();
           connectRaceTimer();
         }
-        showToast(`[${user}] Timer refreshed`);
+        showToast(`[${user}] Timer 1 refreshed`);
+      }
+      break;
+    }
+    case 'timer2': {
+      const arg = args[0] || '';
+      const lower = arg.toLowerCase();
+      if (lower === 'off' || lower === 'remove' || lower === 'clear') {
+        disconnectRaceTimer2();
+        showToast(`[${user}] Timer 2 removed`);
+      } else if (arg) {
+        document.getElementById('racetime-url-2').value = arg;
+        connectRaceTimer2();
+        showToast(`[${user}] Timer 2: ${arg}`);
+      } else {
+        // Full forced refresh — mirrors !timer's bare-arg behaviour.
+        const room = raceTimerState2.room
+          || document.getElementById('racetime-url-2').value.trim();
+        disconnectRaceTimer2();
+        const timerEl = document.getElementById('race-timer-2');
+        timerEl.className = '';
+        timerEl.removeAttribute('style');
+        timerEl.innerHTML = '';
+        if (room) {
+          document.getElementById('racetime-url-2').value = room;
+          updateTimerStyle2();
+          connectRaceTimer2();
+        }
+        showToast(`[${user}] Timer 2 refreshed`);
       }
       break;
     }
@@ -2891,6 +3065,48 @@ function applyConfig(config, user) {
   }
   if (config.timerLayer) {
     setTimerLayer(config.timerLayer);
+  }
+
+  // Restore timer 2 (same shape as timer 1). Tear it down if the incoming
+  // config doesn't include one, so applying an older/foreign config can't
+  // leave a stale secondary clock running on top.
+  if (config.timer2) {
+    raceTimerState2.x = config.timer2.x || 760;
+    raceTimerState2.y = config.timer2.y || 620;
+    if (config.timer2.font) {
+      raceTimerState2.font = config.timer2.font;
+      document.getElementById('timer2-font').value = config.timer2.font;
+    }
+    if (config.timer2.size) {
+      raceTimerState2.size = config.timer2.size;
+      document.getElementById('timer2-size').value = config.timer2.size;
+    }
+    if (config.timer2.color) {
+      raceTimerState2.color = config.timer2.color;
+      document.getElementById('timer2-color').value = config.timer2.color;
+    }
+    if (config.timer2.bg) {
+      raceTimerState2.bg = config.timer2.bg;
+      document.getElementById('timer2-bg').value = config.timer2.bg;
+    }
+    if (config.timer2.bgTransparent) {
+      raceTimerState2.bgTransparent = config.timer2.bgTransparent;
+      document.getElementById('timer2-bg-transparent').checked = true;
+    } else {
+      document.getElementById('timer2-bg-transparent').checked = false;
+    }
+    if (config.timer2.room) {
+      document.getElementById('racetime-url-2').value = config.timer2.room;
+      connectRaceTimer2();
+    } else {
+      disconnectRaceTimer2();
+    }
+    updateTimerStyle2();
+  } else {
+    disconnectRaceTimer2();
+  }
+  if (config.timer2Layer) {
+    setTimer2Layer(config.timer2Layer);
   }
 
   // Restore frame URL
@@ -3085,6 +3301,185 @@ function disconnectRaceTimer() {
     raceTimerState.y = e.clientY - offsetY;
     timerEl.style.left = raceTimerState.x + 'px';
     timerEl.style.top = raceTimerState.y + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (dragging) {
+      dragging = false;
+      saveConfig();
+    }
+  });
+})();
+
+// ============================================================
+// RACETIME.GG TIMER 2 — fully independent second clock. Same shape as timer
+// 1 (its own room, position, style, poll loop) so two races can be shown at
+// once. Kept as a near-duplicate rather than a parameterised refactor because
+// the first timer's DOM/control IDs are hard-coded in many places and the
+// risk of regressing the main clock outweighs the cost of two copies.
+// ============================================================
+let raceTimerState2 = {
+  active: false,
+  startedAt: null,
+  endedAt: null,
+  interval: null,
+  pollInterval: null,
+  room: '',
+  x: 760,
+  y: 620,       // sits below timer 1 by default so they don't overlap
+};
+
+function updateTimerStyle2() {
+  const timerEl = document.getElementById('race-timer-2');
+  const font = document.getElementById('timer2-font').value;
+  const size = document.getElementById('timer2-size').value;
+  const color = document.getElementById('timer2-color').value;
+  const bg = document.getElementById('timer2-bg').value;
+  const bgTransparent = document.getElementById('timer2-bg-transparent').checked;
+
+  timerEl.style.fontFamily = font;
+  timerEl.style.fontSize = size + 'px';
+  timerEl.style.color = color;
+  timerEl.style.background = bgTransparent ? 'transparent' : bg + 'dd';
+  timerEl.style.textShadow = `0 0 10px ${color}44`;
+
+  document.getElementById('timer2-size-val').textContent = size + 'px';
+
+  const smallEl = timerEl.querySelector('.timer-small');
+  if (smallEl) smallEl.style.fontSize = Math.round(size * 0.65) + 'px';
+
+  raceTimerState2.font = font;
+  raceTimerState2.size = parseInt(size);
+  raceTimerState2.color = color;
+  raceTimerState2.bg = bg;
+  raceTimerState2.bgTransparent = bgTransparent;
+  saveConfig();
+}
+
+function pollRaceTimer2() {
+  const room = raceTimerState2.room;
+  if (!room) return;
+  const statusEl = document.getElementById('racetime-status-2');
+  fetch(`https://racetime.gg/${room}/data?t=${Date.now()}`, { cache: 'no-store' })
+    .then(r => {
+      if (!r.ok) throw new Error('Race not found');
+      return r.json();
+    })
+    .then(data => {
+      raceTimerState2.startedAt = data.started_at ? new Date(data.started_at) : null;
+      raceTimerState2.endedAt = data.ended_at ? new Date(data.ended_at) : null;
+      if (statusEl) {
+        statusEl.textContent = 'Connected: ' + (data.status?.value || 'unknown');
+        statusEl.style.color = '#0f0';
+        if (data.entrants) {
+          const twitchNames = data.entrants
+            .filter(e => e.user && e.user.twitch_name)
+            .map(e => e.user.twitch_name);
+          if (twitchNames.length > 0) {
+            statusEl.textContent += ' | Racers: ' + twitchNames.join(', ');
+          }
+        }
+      }
+    })
+    .catch(e => {
+      if (statusEl) {
+        statusEl.textContent = 'Waiting for race data (' + e.message + ')';
+        statusEl.style.color = '#fa0';
+      }
+    });
+}
+
+function connectRaceTimer2() {
+  const input = document.getElementById('racetime-url-2').value.trim();
+  if (!input) return;
+
+  let room = input;
+  room = room.replace(/^https?:\/\/(www\.)?racetime\.gg\//, '');
+  room = room.replace(/\/$/, '');
+  room = room.replace(/\/data$/, '');
+
+  const statusEl = document.getElementById('racetime-status-2');
+  statusEl.textContent = 'Connecting...';
+  statusEl.style.color = '#ff0';
+
+  raceTimerState2.room = room;
+  raceTimerState2.active = true;
+  const timerEl = document.getElementById('race-timer-2');
+  timerEl.classList.add('visible');
+  timerEl.style.left = raceTimerState2.x + 'px';
+  timerEl.style.top = raceTimerState2.y + 'px';
+  if (raceTimerState2.interval) clearInterval(raceTimerState2.interval);
+  raceTimerState2.interval = setInterval(updateRaceTimer2, 100);
+  updateRaceTimer2();
+  saveConfig();
+
+  pollRaceTimer2();
+  if (raceTimerState2.pollInterval) clearInterval(raceTimerState2.pollInterval);
+  raceTimerState2.pollInterval = setInterval(pollRaceTimer2, RACE_POLL_MS);
+}
+
+function updateRaceTimer2() {
+  const timerEl = document.getElementById('race-timer-2');
+  if (!raceTimerState2.active || !raceTimerState2.startedAt) {
+    timerEl.innerHTML = '0:00:00<span class="timer-small">.0</span>';
+    return;
+  }
+
+  const end = raceTimerState2.endedAt || new Date();
+  const elapsed = Math.max(0, end.getTime() - raceTimerState2.startedAt.getTime());
+
+  const ms = Math.floor((elapsed % 1000) / 100);
+  const totalSec = Math.floor(elapsed / 1000);
+  const sec = totalSec % 60;
+  const min = Math.floor(totalSec / 60) % 60;
+  const hr = Math.floor(totalSec / 3600);
+
+  const pad = n => n.toString().padStart(2, '0');
+  timerEl.innerHTML = `${hr}:${pad(min)}:${pad(sec)}<span class="timer-small">.${ms}</span>`;
+}
+
+function disconnectRaceTimer2() {
+  raceTimerState2.active = false;
+  raceTimerState2.startedAt = null;
+  raceTimerState2.endedAt = null;
+  raceTimerState2.room = '';
+  if (raceTimerState2.interval) {
+    clearInterval(raceTimerState2.interval);
+    raceTimerState2.interval = null;
+  }
+  if (raceTimerState2.pollInterval) {
+    clearInterval(raceTimerState2.pollInterval);
+    raceTimerState2.pollInterval = null;
+  }
+  const el = document.getElementById('race-timer-2');
+  if (el) el.classList.remove('visible');
+  const statusEl = document.getElementById('racetime-status-2');
+  if (statusEl) {
+    statusEl.textContent = 'Not connected';
+    statusEl.style.color = '#666';
+  }
+  saveConfig();
+}
+
+// Make timer 2 draggable (independent of timer 1's drag state)
+(function() {
+  let dragging = false, offsetX = 0, offsetY = 0;
+  const timerEl = document.getElementById('race-timer-2');
+
+  timerEl.addEventListener('mousedown', e => {
+    dragging = true;
+    offsetX = e.clientX - timerEl.getBoundingClientRect().left;
+    offsetY = e.clientY - timerEl.getBoundingClientRect().top;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    raceTimerState2.x = e.clientX - offsetX;
+    raceTimerState2.y = e.clientY - offsetY;
+    timerEl.style.left = raceTimerState2.x + 'px';
+    timerEl.style.top = raceTimerState2.y + 'px';
   });
 
   document.addEventListener('mouseup', () => {
