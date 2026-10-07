@@ -1128,6 +1128,39 @@ const ZELDA_LAYOUTS = {
 // knows which slot rectangle to drop a preset into.
 let currentZeldaLayout = null;
 
+// Per-layer frame memory: each layer remembers its own frame image + layer
+// classification + Zelda layout, so switching from a Zelda-4 scene on layer
+// 1 to a Zelda-2 scene on layer 2 also swaps the frame. Keyed by layerNum.
+let layerBackgrounds = {}; // { 1: { frameURL, frameLayer, zeldaLayout }, 2: {...} }
+// Set while activateLayer is replaying a stored background, so the frame
+// mutators we call don't turn around and record over the layer we were
+// trying to recall.
+let _switchingLayer = false;
+
+function recordLayerBackground() {
+  if (_switchingLayer) return;
+  layerBackgrounds[activeLayer] = {
+    frameURL: frameURL || '',
+    frameLayer: frameLayer || null,
+    zeldaLayout: currentZeldaLayout,
+  };
+}
+
+function applyLayerBackground(n) {
+  const bg = layerBackgrounds[n];
+  if (!bg) return;
+  _switchingLayer = true;
+  try {
+    if (bg.frameURL) loadFrameFromURL(bg.frameURL);
+    else removeFrameImage();
+    setFrameLayer(bg.frameLayer || 'normal');
+    currentZeldaLayout = bg.zeldaLayout || null;
+    if (typeof updateZeldaNote === 'function') updateZeldaNote();
+  } finally {
+    _switchingLayer = false;
+  }
+}
+
 // Parse a slot name like "slot3" / "text2" / "SLOT 3" into its kind and index.
 // Returns null when the string doesn't match either form. Bare numbers default
 // to the stream slot namespace since that's the common case.
@@ -1222,6 +1255,10 @@ function applyZeldaLayout(n, user) {
   cropModeId = null;
   currentZeldaLayout = n;
   updateZeldaNote();
+  // Pin the final Zelda number onto this layer's background record — the
+  // loadFrameFromURL/setFrameLayer calls above already wrote entries with
+  // the OLD zeldaLayout; this overwrites them with the one we just set.
+  recordLayerBackground();
   renderAll();
   saveConfig();
   const streamsN = layout.streams.length;
@@ -1258,7 +1295,16 @@ function activateLayer(n) {
   if (!Number.isFinite(n)) return;
   n = Math.max(1, Math.min(99, Math.round(n)));
   if (n === activeLayer) return;
+  // Snapshot the OUTGOING layer's background first so a user who adjusts
+  // the frame while viewing layer 1 doesn't lose their changes when they
+  // switch to layer 2 and come back.
+  recordLayerBackground();
   activeLayer = n;
+  // Swap the frame image / Zelda layout to this layer's stored background.
+  // If this layer has none stored, the current frame carries over, which is
+  // what the operator wants when they're building a new scene from whatever
+  // backdrop they already set up.
+  applyLayerBackground(n);
   updateAllPanelDOM();
   renderLayerButtons();
   applyLayerAudio();
@@ -2342,8 +2388,9 @@ function setFrameLayer(layer) {
   img.classList.remove('layer-front', 'layer-back');
   frameLayer = (layer === 'normal') ? null : layer;
   if (frameLayer) img.classList.add('layer-' + frameLayer);
+  recordLayerBackground();
   saveConfig();
-  showToast(`Frame layer: ${layer}`);
+  if (!_switchingLayer) showToast(`Frame layer: ${layer}`);
 }
 
 function setTimerLayer(layer) {
@@ -2496,6 +2543,7 @@ function getConfig() {
     activeLayer: activeLayer,
     streamPresets: streamPresets.slice(),
     zeldaLayout: currentZeldaLayout,
+    layerBackgrounds: Object.assign({}, layerBackgrounds),
     timer: {
       room: raceTimerState.room || '',
       x: Math.round(raceTimerState.x),
@@ -2643,6 +2691,19 @@ function loadConfig() {
     currentZeldaLayout = config.zeldaLayout;
     updateZeldaNote();
   }
+  if (config.layerBackgrounds && typeof config.layerBackgrounds === 'object') {
+    layerBackgrounds = {};
+    Object.keys(config.layerBackgrounds).forEach(k => {
+      const v = config.layerBackgrounds[k];
+      if (v && typeof v === 'object') layerBackgrounds[k] = {
+        frameURL: v.frameURL || '',
+        frameLayer: v.frameLayer || null,
+        zeldaLayout: typeof v.zeldaLayout === 'number' ? v.zeldaLayout : null,
+      };
+    });
+    // Make the just-restored activeLayer's background visible on screen.
+    applyLayerBackground(activeLayer);
+  }
 
   // Restore timer 2 if saved
   if (config.timer2) {
@@ -2745,8 +2806,9 @@ function loadFrameFromURL(url) {
   document.getElementById('frame-layer-controls').style.display = 'flex';
   document.getElementById('frame-url').value = src;
   frameURL = src;
+  recordLayerBackground();
   saveConfig();
-  showToast('Frame loaded from URL');
+  if (!_switchingLayer) showToast('Frame loaded from URL');
 }
 
 function toggleFrameOpacity() {
@@ -2768,6 +2830,7 @@ function removeFrameImage() {
   frameURL = '';
   frameLayer = null;
   img.classList.remove('layer-front', 'layer-back');
+  recordLayerBackground();
   saveConfig();
 }
 
@@ -3888,6 +3951,18 @@ function applyConfig(config, user) {
   if (typeof config.zeldaLayout === 'number' && ZELDA_LAYOUTS[config.zeldaLayout]) {
     currentZeldaLayout = config.zeldaLayout;
     updateZeldaNote();
+  }
+  if (config.layerBackgrounds && typeof config.layerBackgrounds === 'object') {
+    layerBackgrounds = {};
+    Object.keys(config.layerBackgrounds).forEach(k => {
+      const v = config.layerBackgrounds[k];
+      if (v && typeof v === 'object') layerBackgrounds[k] = {
+        frameURL: v.frameURL || '',
+        frameLayer: v.frameLayer || null,
+        zeldaLayout: typeof v.zeldaLayout === 'number' ? v.zeldaLayout : null,
+      };
+    });
+    applyLayerBackground(activeLayer);
   }
 
   renderAll();
