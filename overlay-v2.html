@@ -83,6 +83,33 @@
      for text panels on 6Zelda, which sit over the OPAQUE brick-ledge area
      of the frame rather than through a transparent hole. */
   .panel.layer-topmost { z-index: 1500 !important; }
+
+  /* Autoplay-blocked prompt — appears over any stream slot whose Twitch
+     iframe is stuck on the thumbnail/play-button state. pointer-events:none
+     is critical: it lets the operator's click pass straight through to the
+     Twitch iframe underneath, which is the ONLY surface that can grant the
+     iframe its own user activation (parent-page clicks don't propagate
+     across the cross-origin boundary). Hidden until the SDK reports
+     PLAYBACK_BLOCKED and removed again on PLAYING. */
+  .panel .autoplay-prompt {
+    display: none;
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+    color: #fff;
+    font: 700 20px/1.2 'Arial Black', sans-serif;
+    text-align: center;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.9), 0 0 2px #000;
+  }
+  .panel .autoplay-prompt::before {
+    content: '\25B6';
+    display: block;
+    font-size: 60px;
+    margin-bottom: 6px;
+    opacity: 0.9;
+  }
+  .panel.autoplay-blocked .autoplay-prompt { display: grid; place-items: center; place-content: center; }
   #race-timer.layer-front { z-index: 999 !important; }
   #race-timer.layer-back { z-index: 1 !important; }
   #race-timer-2.layer-front { z-index: 999 !important; }
@@ -1632,12 +1659,21 @@ function createPanelElement(p) {
   const badge = document.createElement('div');
   badge.className = 'zoom-badge';
 
+  // "Click to start" prompt for autoplay-blocked streams. The prompt is
+  // just a visual hint — the real click has to land on the Twitch iframe
+  // underneath to grant it its own user activation, so pointer-events are
+  // disabled on this element (handled in CSS).
+  const autoplayPrompt = document.createElement('div');
+  autoplayPrompt.className = 'autoplay-prompt';
+  autoplayPrompt.textContent = 'Click to start';
+
   div.appendChild(wrapper);
   div.appendChild(overlay);
   div.appendChild(cropLayer);
   div.appendChild(audioBtn);
   div.appendChild(label);
   div.appendChild(badge);
+  div.appendChild(autoplayPrompt);
 
   return { el: div, player: null, playerContainer, audioBtn, channelLoaded: p.channel };
 }
@@ -3846,7 +3882,24 @@ function startAllStreams() {
     try {
       if (hasMuted) entry.player.setMuted(true);
       if (hasPlay) entry.player.play();
-      report.push(p.presetName + ' (' + p.channel + '): setMuted=' + hasMuted + ' play=' + hasPlay);
+      // Also fire synthetic clicks at the iframe's centre. These are
+      // isTrusted:false so the browser won't count them as user gestures
+      // for autoplay, and cross-origin iframes won't surface them to the
+      // Twitch content either — but you asked to try, so here's the try,
+      // and the diagnostic will show whether anything moved.
+      const iframe = entry.el && entry.el.querySelector('iframe');
+      let clickSummary = 'no iframe';
+      if (iframe) {
+        const r = iframe.getBoundingClientRect();
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        const opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 };
+        iframe.dispatchEvent(new MouseEvent('mousedown', opts));
+        iframe.dispatchEvent(new MouseEvent('mouseup', opts));
+        iframe.dispatchEvent(new MouseEvent('click', opts));
+        clickSummary = 'at (' + Math.round(cx) + ',' + Math.round(cy) + ')';
+      }
+      report.push(p.presetName + ' (' + p.channel + '): setMuted=' + hasMuted + ' play=' + hasPlay + ' click=' + clickSummary);
       played++;
     } catch (e) {
       threw++;
