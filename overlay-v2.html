@@ -1194,7 +1194,14 @@ function applyZeldaLayout(n, user) {
   loadFrameFromURL(ZELDA_FRAME_URL(n));
   setFrameLayer('front');
 
-  // Stream slots: blank-channel Twitch panels.
+  // Apply the layout to the CURRENT active layer only. Clicking Zelda from a
+  // new layer used to wipe every panel and rebuild with layerNum: 1 — the
+  // "going back to layer 1 deletes layer 2" and "new layer's Zelda has no
+  // streams to put stuff in" bugs were two faces of that one mistake. Now
+  // other layers are untouched; only the active layer's slots are replaced.
+  const targetLayer = activeLayer;
+
+  // Stream slots: blank-channel Twitch panels on the active layer.
   const streamPanels = layout.streams.map((r, i) => ({
     id: 'p' + Date.now() + '_s' + i,
     type: 'stream', channel: '',
@@ -1204,7 +1211,7 @@ function applyZeldaLayout(n, user) {
     textBg: '#000000', textBgTransparent: false, textAlign: 'center',
     x: r.x, y: r.y, w: r.w, h: r.h,
     zoom: 1, panX: 0, panY: 0,
-    layer: null, layerNum: 1,
+    layer: null, layerNum: targetLayer,
     presetName: 'slot' + (i + 1),
   }));
 
@@ -1231,11 +1238,13 @@ function applyZeldaLayout(n, user) {
     textAlign: 'center',
     x: r.x, y: r.y, w: r.w, h: r.h,
     zoom: 1, panX: 0, panY: 0,
-    layer: td.layer, layerNum: 1,
+    layer: td.layer, layerNum: targetLayer,
     presetName: 'text' + (i + 1),
   }));
 
-  panels = streamPanels.concat(textPanels);
+  // Preserve panels on OTHER layers; only clear this layer's own slots.
+  panels = panels.filter(p => (p.layerNum || 1) !== targetLayer)
+    .concat(streamPanels, textPanels);
   selectedId = null;
   cropModeId = null;
   currentZeldaLayout = n;
@@ -1245,7 +1254,7 @@ function applyZeldaLayout(n, user) {
   const streamsN = layout.streams.length;
   const textsN = layout.texts.length;
   const extras = textsN ? (', ' + textsN + ' text slot' + (textsN === 1 ? '' : 's')) : '';
-  showToast((user ? '[' + user + '] ' : '') + 'Zelda ' + n + '-slot layout applied (' + streamsN + ' streams' + extras + ')');
+  showToast((user ? '[' + user + '] ' : '') + 'Zelda ' + n + '-slot layout applied to layer ' + targetLayer + ' (' + streamsN + ' streams' + extras + ')');
 }
 
 function updateZeldaNote() {
@@ -1405,12 +1414,17 @@ function loadPresetByName(name, user, slotName) {
     return false;
   }
   const identity = slotName ? slotIdentity(slotName) : name;
-  let p = panels.find(x => x.presetName === identity);
+  // Prefer the slot panel on the ACTIVE layer so loading into slot1 on
+  // layer 2 doesn't walk over layer 1's slot1. Fall back to any match, then
+  // create a new panel bound to this layer if nothing exists yet.
+  let p = panels.find(x => x.presetName === identity && (x.layerNum || 1) === activeLayer)
+       || panels.find(x => x.presetName === identity);
   if (!p) {
     p = {
       id: (preset.type === 'url' ? 'u' : preset.type === 'text' ? 't' : 'p')
         + Date.now() + '_' + Math.floor(Math.random() * 1000),
       presetName: identity,
+      layerNum: activeLayer,
     };
     panels.push(p);
   }
@@ -1421,11 +1435,15 @@ function loadPresetByName(name, user, slotName) {
   if (rect) {
     p.x = rect.x; p.y = rect.y; p.w = rect.w; p.h = rect.h;
   }
+  // A slot load should land on the active layer regardless of what layer
+  // the preset was snapshotted from — the slot belongs to the scene the
+  // operator is editing right now, not to the scene the preset came from.
+  if (slotName) p.layerNum = activeLayer;
   if (!p.type) p.type = 'stream';
   if (p.zoom === undefined) p.zoom = 1;
   if (p.panX === undefined) p.panX = 0;
   if (p.panY === undefined) p.panY = 0;
-  if (p.layerNum === undefined) p.layerNum = 1;
+  if (p.layerNum === undefined) p.layerNum = activeLayer;
   renderAll();
   saveConfig();
   const where = slotName ? ' into ' + identity : '';
@@ -1508,7 +1526,7 @@ function renderPresetList() {
       // picked a slot that already shows a different stream, confirm before
       // overwriting — the question we had to settle for the chat command, but
       // in the sidebar we can actually ask.
-      const existing = panels.find(x => x.presetName === slotIdentity(slot));
+      const existing = panels.find(x => x.presetName === slotIdentity(slot) && (x.layerNum || 1) === activeLayer);
       const existingContent = existing && (existing.type === 'text' ? existing.text : existing.channel);
       if (existingContent && existingContent !== preset.channel && existingContent !== preset.text) {
         if (!confirm('Replace ' + slot + ' ("' + existingContent + '") with "' + preset.name + '"?')) return;
@@ -1812,13 +1830,15 @@ function renderPanelList() {
   // The "Streams" card lists only stream + URL panels now; text panels have
   // their own card (renderTextList) so a mixed layout — e.g. 6 stream slots
   // plus 6 brick-ledge labels — doesn't bury the stream channel fields in a
-  // 12-row list where half the rows are labels.
+  // 12-row list where half the rows are labels. Only panels on the active
+  // layer show up — the sidebar is a scene view, same as the canvas.
   const list = document.getElementById('panel-list');
   if (!list) return;
   list.innerHTML = '';
 
   panels.forEach(p => {
     if (p.type === 'text') return;
+    if ((p.layerNum || 1) !== activeLayer) return;
     const item = buildPanelListItem(p);
     list.appendChild(item);
   });
@@ -1829,7 +1849,9 @@ function renderTextList() {
   if (!list) return;
   list.innerHTML = '';
 
-  const textPanels = panels.filter(p => p.type === 'text');
+  // Only the active layer's text panels show up here, same scene-view rule
+  // as the Streams card above.
+  const textPanels = panels.filter(p => p.type === 'text' && (p.layerNum || 1) === activeLayer);
   const section = document.getElementById('text-section');
   // Hide the whole card entirely when there are no text panels so the sidebar
   // doesn't carry a dead section around for people who never use labels.
@@ -1853,9 +1875,12 @@ function buildPanelListItem(p) {
   // the sidebar now. The column heading (Streams / Text Boxes) disambiguates;
   // the full slot/text identity is still kept in the tooltip for anyone
   // typing a chat command.
-  const kindList = p.type === 'text'
+  // Scoped to the active layer so stream 1 on layer 2's sidebar numbering
+  // doesn't collide with stream 1 on layer 1 (they live in separate scenes).
+  const kindList = (p.type === 'text'
     ? panels.filter(x => x.type === 'text')
-    : panels.filter(x => x.type !== 'text');
+    : panels.filter(x => x.type !== 'text')
+  ).filter(x => (x.layerNum || 1) === activeLayer);
   const kindIdx = kindList.indexOf(p) + 1;
   num.textContent = kindIdx;
   num.title = p.presetName || '';
