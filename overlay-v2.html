@@ -758,6 +758,12 @@
     <div id="panel-list"></div>
   </div>
 
+  <div class="sidebar-section" id="text-section">
+    <h3>Text Boxes</h3>
+    <p style="font-size:11px; color:#888; margin:0 0 6px;">Each row shows the label for one text slot. Click a row to select the panel; type to update it live.</p>
+    <div id="text-list"></div>
+  </div>
+
   <div class="sidebar-section">
     <h3>Panel Layers</h3>
     <p style="font-size:11px; color:#888; margin:0 0 6px;">Each panel sits on a numbered layer. The active layer floats to the front; others sit behind. Switch with the buttons here or <code>!layer &lt;n&gt;</code> / <code>!layer next</code> in chat.</p>
@@ -1388,6 +1394,7 @@ function renderAll() {
   syncCanvasDOM();
   updateAllPanelDOM();
   renderPanelList();
+  renderTextList();
   renderPanelDetail();
   renderLayerButtons();
   renderPresetList();
@@ -1637,38 +1644,72 @@ function updateAllPanelDOM() {
 }
 
 function renderPanelList() {
+  // The "Streams" card lists only stream + URL panels now; text panels have
+  // their own card (renderTextList) so a mixed layout — e.g. 6 stream slots
+  // plus 6 brick-ledge labels — doesn't bury the stream channel fields in a
+  // 12-row list where half the rows are labels.
   const list = document.getElementById('panel-list');
   if (!list) return;
   list.innerHTML = '';
 
-  panels.forEach((p, i) => {
-    const item = document.createElement('div');
-    item.className = 'panel-list-item' + (p.id === selectedId ? ' active' : '');
-    item.onclick = () => { selectedId = p.id; renderAll(); };
-
-    const num = document.createElement('span');
-    num.textContent = (i + 1) + '.';
-    num.style.color = '#666';
-    num.style.fontSize = '11px';
-    num.style.minWidth = '18px';
-
-    const inp = document.createElement('input');
-    inp.type = 'text';
-    inp.value = p.type === 'url' ? (p.url || '') : p.type === 'text' ? (p.text || '') : p.channel;
-    inp.placeholder = p.type === 'url' ? 'https://...' : p.type === 'text' ? 'text' : 'channel_name';
-    inp.onclick = e => e.stopPropagation();
-    inp.oninput = () => {
-      if (p.type === 'url') { p.url = inp.value; }
-      else if (p.type === 'text') { p.text = inp.value; }
-      else { p.channel = inp.value; }
-      updateAllPanelDOM();
-      saveConfig();
-    };
-
-    item.appendChild(num);
-    item.appendChild(inp);
+  panels.forEach(p => {
+    if (p.type === 'text') return;
+    const item = buildPanelListItem(p);
     list.appendChild(item);
   });
+}
+
+function renderTextList() {
+  const list = document.getElementById('text-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  const textPanels = panels.filter(p => p.type === 'text');
+  const section = document.getElementById('text-section');
+  // Hide the whole card entirely when there are no text panels so the sidebar
+  // doesn't carry a dead section around for people who never use labels.
+  if (section) section.style.display = textPanels.length ? '' : 'none';
+  if (!textPanels.length) return;
+
+  textPanels.forEach(p => {
+    const item = buildPanelListItem(p);
+    list.appendChild(item);
+  });
+}
+
+function buildPanelListItem(p) {
+  const item = document.createElement('div');
+  item.className = 'panel-list-item' + (p.id === selectedId ? ' active' : '');
+  item.onclick = () => { selectedId = p.id; renderAll(); };
+
+  const num = document.createElement('span');
+  // Label the row with the panel's slot/text identity when it has one
+  // (slot1 / text3 / preset name) — a bare 1-indexed number was fine when
+  // every panel was a stream, but once there are two parallel lists the
+  // original index stops matching what the operator typed in chat.
+  const panelIdx = panels.indexOf(p) + 1;
+  num.textContent = p.presetName ? p.presetName : (panelIdx + '.');
+  num.style.color = '#888';
+  num.style.fontSize = '11px';
+  num.style.minWidth = '42px';
+  num.style.whiteSpace = 'nowrap';
+
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.value = p.type === 'url' ? (p.url || '') : p.type === 'text' ? (p.text || '') : p.channel;
+  inp.placeholder = p.type === 'url' ? 'https://...' : p.type === 'text' ? 'label text' : 'channel_name';
+  inp.onclick = e => e.stopPropagation();
+  inp.oninput = () => {
+    if (p.type === 'url') { p.url = inp.value; }
+    else if (p.type === 'text') { p.text = inp.value; }
+    else { p.channel = inp.value; }
+    updateAllPanelDOM();
+    saveConfig();
+  };
+
+  item.appendChild(num);
+  item.appendChild(inp);
+  return item;
 }
 
 function renderPanelDetail() {
