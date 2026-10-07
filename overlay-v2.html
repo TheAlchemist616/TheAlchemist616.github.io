@@ -74,6 +74,11 @@
   #frame-image.layer-back { z-index: 0 !important; }
   .panel.layer-front { z-index: 900 !important; }
   .panel.layer-back { z-index: 10 !important; }
+  /* Numbered layer system (separate from the manual front/back override above).
+     Panels whose layerNum matches activeLayer get bumped above the default 100
+     stacking context; manual .layer-front / .layer-back still win via !important. */
+  .panel.layer-num-active { z-index: 500; }
+  .panel.layer-num-inactive { z-index: 50; }
   #race-timer.layer-front { z-index: 999 !important; }
   #race-timer.layer-back { z-index: 1 !important; }
   #race-timer-2.layer-front { z-index: 999 !important; }
@@ -618,7 +623,10 @@
       <code>!frame off</code> — remove frame<br>
       <code>!config &lt;url/hash&gt;</code> — load full config<br>
       <code>!reload</code> — pull latest config from cloud<br>
-      <code>!sync</code> — re-sync all stream players
+      <code>!sync</code> — re-sync all stream players<br>
+      <code>!load &lt;preset&gt;</code> — drop a saved panel preset into the layout<br>
+      <code>!presets</code> — list saved preset names<br>
+      <code>!layer &lt;n|next|prev&gt;</code> — bring a numbered layer forward</code>
     </div>
   </div>
 
@@ -734,6 +742,28 @@
     <div id="panel-list"></div>
   </div>
 
+  <div class="sidebar-section">
+    <h3>Panel Layers</h3>
+    <p style="font-size:11px; color:#888; margin:0 0 6px;">Each panel sits on a numbered layer. The active layer floats to the front; others sit behind. Switch with the buttons here or <code>!layer &lt;n&gt;</code> / <code>!layer next</code> in chat.</p>
+    <div class="sidebar-row" style="gap:4px; flex-wrap:wrap;" id="layer-buttons"></div>
+    <div class="sidebar-row" style="gap:4px; margin-top:4px;">
+      <button class="btn btn-sm" onclick="activateLayer(getActiveLayer() - 1)">&larr; Prev</button>
+      <button class="btn btn-sm" onclick="activateLayer(getActiveLayer() + 1)">Next &rarr;</button>
+      <button class="btn btn-sm" onclick="addNewLayer()" title="Add another numbered layer so you can assign panels to it">+ New layer</button>
+    </div>
+    <div id="layer-active-note" style="font-size:11px; color:#888; margin-top:4px;">Active: layer 1</div>
+  </div>
+
+  <div class="sidebar-section">
+    <h3>Panel Presets</h3>
+    <p style="font-size:11px; color:#888; margin:0 0 6px;">A preset snapshots one panel (channel, position, size, zoom/pan, style, layer). Loading it recreates that exact panel; loading one that already exists updates it in place. Load from chat with <code>!load &lt;name&gt;</code>.</p>
+    <div class="sidebar-row" style="gap:4px;">
+      <input type="text" id="preset-name" placeholder="preset name" style="flex:1;">
+      <button class="btn btn-sm btn-primary" onclick="savePresetFromSelected()" title="Save the selected panel as a preset (needs a selected panel)">Save selected</button>
+    </div>
+    <div id="preset-list" style="margin-top:6px; display:flex; flex-direction:column; gap:4px;"></div>
+  </div>
+
   <div id="panel-detail" class="sidebar-section">
     <h3 id="det-title">Selected Stream</h3>
     <div class="sidebar-row" id="det-channel-row">
@@ -819,6 +849,11 @@
       <button class="btn btn-sm" onclick="setPanelLayer('normal')">Normal</button>
       <button class="btn btn-sm" onclick="setPanelLayer('back')">Back</button>
     </div>
+    <div class="sidebar-row" style="margin-top:4px;">
+      <label style="min-width:40px;">Layer #</label>
+      <input type="number" id="det-layernum" min="1" max="99" step="1" value="1" style="width:60px;" onchange="setSelectedLayerNum(parseInt(this.value) || 1)">
+      <span style="font-size:11px; color:#888;">Which numbered layer this panel belongs to</span>
+    </div>
   </div>
 
   <div class="sidebar-section">
@@ -850,6 +885,13 @@ let audioActiveId = null; // which panel has audio
 
 // Drag/resize state
 let dragState = null;
+
+// Numbered panel layers + named presets. Both persist in getConfig/saveConfig.
+// activeLayer bumps all panels with p.layerNum === activeLayer above the rest
+// via a CSS class; it does NOT hide the others, so iframes keep buffering and
+// a layer swap is instant. streamPresets is a flat array of named snapshots.
+let activeLayer = 1;
+let streamPresets = []; // [{name, type, channel, url, text, textFont, …, x, y, w, h, zoom, panX, panY, layer, layerNum}]
 
 // ============================================================
 // PRESETS — grid layouts
@@ -928,11 +970,205 @@ function applyPreset(cols, rows) {
 // ============================================================
 const panelElements = new Map(); // id -> { el, iframe, channelLoaded }
 
+// ============================================================
+// NUMBERED PANEL LAYERS
+// ============================================================
+function getActiveLayer() { return activeLayer; }
+
+function distinctLayerNums() {
+  const set = new Set([1, activeLayer]);
+  panels.forEach(p => { if (typeof p.layerNum === 'number') set.add(p.layerNum); });
+  return [...set].sort((a, b) => a - b);
+}
+
+function activateLayer(n) {
+  if (!Number.isFinite(n)) return;
+  n = Math.max(1, Math.min(99, Math.round(n)));
+  if (n === activeLayer) return;
+  activeLayer = n;
+  updateAllPanelDOM();
+  renderLayerButtons();
+  saveConfig();
+}
+
+function addNewLayer() {
+  // The next layer number nobody is using yet. Pulling the max + 1 means two
+  // "new layer" clicks in a row create two distinct, empty layers.
+  const used = distinctLayerNums();
+  const next = used[used.length - 1] + 1;
+  activateLayer(next);
+}
+
+function setSelectedLayerNum(n) {
+  const p = panels.find(p => p.id === selectedId);
+  if (!p) return;
+  p.layerNum = Math.max(1, Math.min(99, Math.round(n) || 1));
+  updateAllPanelDOM();
+  renderLayerButtons();
+  saveConfig();
+}
+
+function renderLayerButtons() {
+  const host = document.getElementById('layer-buttons');
+  if (!host) return;
+  host.innerHTML = '';
+  const nums = distinctLayerNums();
+  nums.forEach(n => {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-sm' + (n === activeLayer ? ' btn-primary' : '');
+    // Count panels on this layer so the operator can tell at a glance whether
+    // "layer 3" has anything on it.
+    const count = panels.filter(p => (p.layerNum || 1) === n).length;
+    btn.textContent = n + (count ? ' (' + count + ')' : '');
+    btn.title = 'Bring layer ' + n + ' forward' + (count ? '' : ' (currently empty)');
+    btn.onclick = () => activateLayer(n);
+    host.appendChild(btn);
+  });
+  const note = document.getElementById('layer-active-note');
+  if (note) note.textContent = 'Active: layer ' + activeLayer;
+}
+
+// ============================================================
+// NAMED PANEL PRESETS — one preset == a full snapshot of one panel bound to
+// a name. Load uses the preset NAME as the panel identity so loading the
+// same preset twice updates the existing panel in place rather than piling
+// up duplicates. Chat command is !load <name>.
+// ============================================================
+const PRESET_FIELDS = [
+  'type', 'channel', 'url', 'text',
+  'textFont', 'textSize', 'textColor', 'textBg', 'textBgTransparent', 'textAlign',
+  'x', 'y', 'w', 'h',
+  'zoom', 'panX', 'panY',
+  'layer', 'layerNum',
+];
+
+function snapshotPanelFields(p) {
+  const out = {};
+  PRESET_FIELDS.forEach(k => { if (p[k] !== undefined) out[k] = p[k]; });
+  return out;
+}
+
+function savePresetByName(name, panelFields) {
+  name = String(name || '').trim();
+  if (!name) return false;
+  const existing = streamPresets.findIndex(x => x.name === name);
+  const preset = Object.assign({ name }, panelFields);
+  if (existing >= 0) streamPresets[existing] = preset;
+  else streamPresets.push(preset);
+  renderPresetList();
+  saveConfig();
+  return true;
+}
+
+function savePresetFromSelected() {
+  const p = panels.find(p => p.id === selectedId);
+  if (!p) { showToast('Select a panel to save as a preset'); return; }
+  const nameEl = document.getElementById('preset-name');
+  // Empty name field = re-save the preset this panel was loaded from. That is
+  // the normal "I nudged it, update my saved slot" workflow — forcing a name
+  // every time would surprise anyone who just edited a loaded preset.
+  const name = ((nameEl && nameEl.value) || p.presetName || '').trim();
+  if (!name) { showToast('Give the preset a name first'); return; }
+  savePresetByName(name, snapshotPanelFields(p));
+  p.presetName = name;
+  saveConfig();
+  renderPanelList();
+  if (nameEl) nameEl.value = '';
+  showToast('Saved preset "' + name + '"');
+}
+
+function loadPresetByName(name, user) {
+  const preset = streamPresets.find(x => x.name === name);
+  if (!preset) {
+    showToast((user ? '[' + user + '] ' : '') + 'No preset "' + name + '"');
+    return false;
+  }
+  // Find the panel already bound to this preset (if any) and overwrite it in
+  // place. applyFields rebuilds every field the preset covers; others stay.
+  let p = panels.find(x => x.presetName === name);
+  if (!p) {
+    p = {
+      id: (preset.type === 'url' ? 'u' : preset.type === 'text' ? 't' : 'p')
+        + Date.now() + '_' + Math.floor(Math.random() * 1000),
+      presetName: name,
+    };
+    panels.push(p);
+  }
+  PRESET_FIELDS.forEach(k => {
+    if (preset[k] !== undefined) p[k] = preset[k];
+  });
+  // Fill in defaults in case the preset was saved before some field existed.
+  if (!p.type) p.type = 'stream';
+  if (p.zoom === undefined) p.zoom = 1;
+  if (p.panX === undefined) p.panX = 0;
+  if (p.panY === undefined) p.panY = 0;
+  if (p.layerNum === undefined) p.layerNum = 1;
+  renderAll();
+  saveConfig();
+  showToast((user ? '[' + user + '] ' : '') + 'Loaded preset "' + name + '"');
+  return true;
+}
+
+function deletePresetByName(name) {
+  const i = streamPresets.findIndex(x => x.name === name);
+  if (i < 0) return;
+  streamPresets.splice(i, 1);
+  renderPresetList();
+  saveConfig();
+}
+
+function renderPresetList() {
+  const host = document.getElementById('preset-list');
+  if (!host) return;
+  host.innerHTML = '';
+  if (!streamPresets.length) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'font-size:11px; color:#666;';
+    empty.textContent = 'No presets saved yet.';
+    host.appendChild(empty);
+    return;
+  }
+  streamPresets.forEach(preset => {
+    const row = document.createElement('div');
+    row.className = 'sidebar-row';
+    row.style.gap = '4px';
+
+    const label = document.createElement('span');
+    label.style.cssText = 'flex:1; font-size:12px; color:#ddd; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+    const whatIsIt = preset.type === 'url' ? 'URL'
+      : preset.type === 'text' ? 'text'
+      : (preset.channel || '?');
+    label.textContent = preset.name + ' — ' + whatIsIt;
+    label.title = preset.name + ' (' + preset.w + '×' + preset.h + ' @ ' + preset.x + ',' + preset.y + ')';
+
+    const load = document.createElement('button');
+    load.className = 'btn btn-sm btn-primary';
+    load.textContent = 'Load';
+    load.onclick = () => loadPresetByName(preset.name, null);
+
+    const del = document.createElement('button');
+    del.className = 'btn btn-sm btn-danger';
+    del.textContent = '×';
+    del.title = 'Delete preset';
+    del.onclick = () => {
+      if (!confirm('Delete preset "' + preset.name + '"?')) return;
+      deletePresetByName(preset.name);
+    };
+
+    row.appendChild(label);
+    row.appendChild(load);
+    row.appendChild(del);
+    host.appendChild(row);
+  });
+}
+
 function renderAll() {
   syncCanvasDOM();
   updateAllPanelDOM();
   renderPanelList();
   renderPanelDetail();
+  renderLayerButtons();
+  renderPresetList();
 }
 
 function syncCanvasDOM() {
@@ -1094,11 +1330,13 @@ function updateAllPanelDOM() {
     const el = entry.el;
 
     // Update classes
+    const panelLayerNum = typeof p.layerNum === 'number' ? p.layerNum : 1;
     el.className = 'panel'
       + (p.id === selectedId ? ' selected' : '')
       + (p.id === cropModeId ? ' crop-mode' : '')
       + (p.layer ? ' layer-' + p.layer : '')
-      + (p.type === 'text' ? ' text-panel' : '');
+      + (p.type === 'text' ? ' text-panel' : '')
+      + (panelLayerNum === activeLayer ? ' layer-num-active' : ' layer-num-inactive');
 
     // Position and size
     el.style.left = p.x + 'px';
@@ -1249,6 +1487,7 @@ function renderPanelDetail() {
   document.getElementById('det-h').value = Math.round(p.h);
   document.getElementById('det-zoom').value = p.zoom;
   document.getElementById('det-zoom-val').textContent = p.zoom.toFixed(1) + 'x';
+  document.getElementById('det-layernum').value = typeof p.layerNum === 'number' ? p.layerNum : 1;
 
   // Update crop mode button
   const cropBtn = document.getElementById('btn-crop');
@@ -1815,7 +2054,11 @@ function getConfig() {
       panX: Math.round(p.panX),
       panY: Math.round(p.panY),
       layer: p.layer || null,
+      layerNum: typeof p.layerNum === 'number' ? p.layerNum : 1,
+      presetName: p.presetName || null,
     })),
+    activeLayer: activeLayer,
+    streamPresets: streamPresets.slice(),
     timer: {
       room: raceTimerState.room || '',
       x: Math.round(raceTimerState.x),
@@ -1905,6 +2148,8 @@ function loadConfig() {
       panX: p.panX || 0,
       panY: p.panY || 0,
       layer: p.layer || null,
+      layerNum: typeof p.layerNum === 'number' ? p.layerNum : 1,
+      presetName: p.presetName || undefined,
     }));
   } else {
     // Default: 6-stream 3x2 layout
@@ -1951,6 +2196,12 @@ function loadConfig() {
     if (el) el.value = config.chat.channel;
     if (trusted) setTimeout(() => connectChat(), 500);
   }
+
+  // Named panel presets + which numbered layer is on top. Both carry over
+  // unconditionally — they are the operator's own layout data, not a side
+  // effect that reaches off this page.
+  if (Array.isArray(config.streamPresets)) streamPresets = config.streamPresets.slice();
+  if (typeof config.activeLayer === 'number') activeLayer = config.activeLayer;
 
   // Restore timer 2 if saved
   if (config.timer2) {
@@ -2959,6 +3210,77 @@ function handleCommand(user, msg) {
       applyConfigFromString(arg, user);
       break;
     }
+    case 'load':
+    case 'preset': {
+      // !load <name>              — drop preset <name> into the layout
+      // !preset load <name>       — same thing, long form
+      // !preset list              — toast the saved names
+      // !preset delete <name>     — forget a preset
+      const sub = (args[0] || '').toLowerCase();
+      let name;
+      if (cmd === 'preset' && (sub === 'load' || sub === 'use')) {
+        name = args.slice(1).join(' ').trim();
+      } else if (cmd === 'preset' && (sub === 'list' || sub === 'ls')) {
+        if (!streamPresets.length) {
+          showToast(`[${user}] No presets saved`);
+        } else {
+          showToast(`[${user}] Presets: ` + streamPresets.map(x => x.name).join(', '));
+        }
+        break;
+      } else if (cmd === 'preset' && (sub === 'delete' || sub === 'remove' || sub === 'rm')) {
+        const target = args.slice(1).join(' ').trim();
+        if (!target) break;
+        if (streamPresets.find(x => x.name === target)) {
+          deletePresetByName(target);
+          showToast(`[${user}] Deleted preset "${target}"`);
+        } else {
+          showToast(`[${user}] No preset "${target}"`);
+        }
+        break;
+      } else {
+        // Bare !load <name> OR !preset <name> (no sub-verb).
+        name = args.join(' ').trim();
+      }
+      if (!name) {
+        showToast(`[${user}] Usage: !load <preset>`);
+        break;
+      }
+      loadPresetByName(name, user);
+      break;
+    }
+    case 'presets': {
+      if (!streamPresets.length) {
+        showToast(`[${user}] No presets saved`);
+      } else {
+        showToast(`[${user}] Presets: ` + streamPresets.map(x => x.name).join(', '));
+      }
+      break;
+    }
+    case 'layer': {
+      // !layer <n>      — bring numbered layer <n> to the front
+      // !layer next/+   — step to the next used layer number
+      // !layer prev/-   — step to the previous used layer number
+      const raw = (args[0] || '').toLowerCase();
+      const used = distinctLayerNums();
+      if (raw === 'next' || raw === '+') {
+        const i = Math.max(0, used.indexOf(activeLayer));
+        activateLayer(used[(i + 1) % used.length]);
+        showToast(`[${user}] Active layer: ${activeLayer}`);
+      } else if (raw === 'prev' || raw === '-') {
+        const i = Math.max(0, used.indexOf(activeLayer));
+        activateLayer(used[(i - 1 + used.length) % used.length]);
+        showToast(`[${user}] Active layer: ${activeLayer}`);
+      } else {
+        const n = parseInt(raw, 10);
+        if (Number.isFinite(n) && n >= 1) {
+          activateLayer(n);
+          showToast(`[${user}] Active layer: ${activeLayer}`);
+        } else {
+          showToast(`[${user}] Usage: !layer <n|next|prev>`);
+        }
+      }
+      break;
+    }
   }
 }
 
@@ -3045,6 +3367,8 @@ function applyConfig(config, user) {
     zoom: p.zoom || 1,
     panX: p.panX || 0, panY: p.panY || 0,
     layer: p.layer || null,
+    layerNum: typeof p.layerNum === 'number' ? p.layerNum : 1,
+    presetName: p.presetName || undefined,
   }));
 
   // Restore timer — order matters: set x/y/style state BEFORE connectRaceTimer,
@@ -3135,6 +3459,12 @@ function applyConfig(config, user) {
     const audioPanel = panels.find(p => p.channel === config.audioChannel);
     if (audioPanel) audioActiveId = audioPanel.id;
   }
+
+  // Named presets and the current active layer travel with the config. A
+  // missing streamPresets array means an older/foreign export — leave the
+  // operator's existing presets alone rather than wiping them.
+  if (Array.isArray(config.streamPresets)) streamPresets = config.streamPresets.slice();
+  if (typeof config.activeLayer === 'number') activeLayer = config.activeLayer;
 
   renderAll();
   saveConfig();
