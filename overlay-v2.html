@@ -84,32 +84,6 @@
      of the frame rather than through a transparent hole. */
   .panel.layer-topmost { z-index: 1500 !important; }
 
-  /* Autoplay-blocked prompt — appears over any stream slot whose Twitch
-     iframe is stuck on the thumbnail/play-button state. pointer-events:none
-     is critical: it lets the operator's click pass straight through to the
-     Twitch iframe underneath, which is the ONLY surface that can grant the
-     iframe its own user activation (parent-page clicks don't propagate
-     across the cross-origin boundary). Hidden until the SDK reports
-     PLAYBACK_BLOCKED and removed again on PLAYING. */
-  .panel .autoplay-prompt {
-    display: none;
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 50;
-    color: #fff;
-    font: 700 20px/1.2 'Arial Black', sans-serif;
-    text-align: center;
-    text-shadow: 0 2px 8px rgba(0,0,0,0.9), 0 0 2px #000;
-  }
-  .panel .autoplay-prompt::before {
-    content: '\25B6';
-    display: block;
-    font-size: 60px;
-    margin-bottom: 6px;
-    opacity: 0.9;
-  }
-  .panel.autoplay-blocked .autoplay-prompt { display: grid; place-items: center; place-content: center; }
   #race-timer.layer-front { z-index: 999 !important; }
   #race-timer.layer-back { z-index: 1 !important; }
   #race-timer-2.layer-front { z-index: 999 !important; }
@@ -553,13 +527,6 @@
   <h2>Overlay Editor</h2>
 
   <div class="sidebar-section">
-    <button class="btn btn-primary" style="width:100%; font-size:14px; padding:10px;" onclick="startAllStreams()">
-      &#x25B6;&nbsp; Start / Restart All Streams
-    </button>
-    <p style="font-size:11px; color:#888; margin:6px 0 0;">Browsers block iframe autoplay until the page has had a user click. Press this once at setup to kick every stream into play; after that <code>!play</code> from chat works too.</p>
-  </div>
-
-  <div class="sidebar-section">
     <h3>Zelda Layout</h3>
     <p style="font-size:11px; color:#888; margin:0 0 6px;">Preset layouts for the Zelda II frame image. Loads the matching background on top, sets up blank-channel stream panels in the big holes (slot1..slotN), and empty text panels in the banner strips (text1..textM — the 2-slot layout has 2, the 4-slot has 4, the 6-slot has none). Fill channels / text in afterwards, or push them in via chat with <code>!load &lt;preset&gt; slot1</code> or <code>!label text1 Alchemist</code>.</p>
     <div class="sidebar-row" style="gap:4px;">
@@ -887,7 +854,6 @@
       <b style="color:#00d4ff;">Broadcaster + mods only:</b><br>
       <code>!audio &lt;channel&gt;</code> — switch audio<br>
       <code>!mute</code> — mute all streams<br>
-      <code>!play [slot&lt;N&gt;|channel]</code> — restart streams. First time only, click <b>Start / Restart All Streams</b> at the top of the sidebar to grant autoplay — chat <code>!play</code> works for the rest of the session after that.<br>
       <code>!sync</code> — reload all streams<br>
       <code>!layout &lt;cols&gt;x&lt;rows&gt;</code> — e.g. 3x2<br>
       <code>!add &lt;channel&gt;</code> — add stream<br>
@@ -1537,30 +1503,10 @@ function syncCanvasDOM() {
   });
 }
 
-// Instantiate (or re-instantiate) the Twitch.Player for a stream panel, if
-// its channel is non-empty. Called from syncCanvasDOM when the panel first
-// appears AND from updateAllPanelDOM when a blank channel first gets a value.
-// Tear down the current Twitch.Player for a panel and build a fresh one.
-// Used by !play: calling .play() on an already-created iframe is blocked by
-// the browser's autoplay policy when the trigger is a chat message (no user
-// gesture). A brand-new iframe gets a fresh autoplay evaluation; muted
-// autoplay is universally allowed, so this usually succeeds where .play()
-// didn't. Keeps the panel's channel/geometry/audio state intact.
-function rebuildPlayer(panel) {
-  const entry = panelElements.get(panel.id);
-  if (!entry) return false;
-  const target = document.getElementById('tp-' + panel.id);
-  if (!target) return false;
-  // Twitch.Player's own destroy() is unreliable across SDK versions; the
-  // safest teardown is to clear the mount node, which removes the iframe
-  // and lets Twitch.Player attach a new one on the same id.
-  target.innerHTML = '';
-  entry.player = null;
-  entry.channelLoaded = null;
-  initPanelPlayer(entry, panel);
-  return !!entry.player;
-}
-
+// Instantiate the Twitch.Player for a stream panel if its channel is
+// non-empty. Called from syncCanvasDOM when the panel first appears AND
+// from updateAllPanelDOM when a blank channel first gets a value (typing
+// a Twitch handle into a freshly-applied Zelda slot).
 function initPanelPlayer(entry, panel) {
   if (!panel.channel) return; // nothing to load yet; try again when a channel is set
   const target = document.getElementById('tp-' + panel.id);
@@ -1659,21 +1605,12 @@ function createPanelElement(p) {
   const badge = document.createElement('div');
   badge.className = 'zoom-badge';
 
-  // "Click to start" prompt for autoplay-blocked streams. The prompt is
-  // just a visual hint — the real click has to land on the Twitch iframe
-  // underneath to grant it its own user activation, so pointer-events are
-  // disabled on this element (handled in CSS).
-  const autoplayPrompt = document.createElement('div');
-  autoplayPrompt.className = 'autoplay-prompt';
-  autoplayPrompt.textContent = 'Click to start';
-
   div.appendChild(wrapper);
   div.appendChild(overlay);
   div.appendChild(cropLayer);
   div.appendChild(audioBtn);
   div.appendChild(label);
   div.appendChild(badge);
-  div.appendChild(autoplayPrompt);
 
   return { el: div, player: null, playerContainer, audioBtn, channelLoaded: p.channel };
 }
@@ -3367,61 +3304,6 @@ function handleCommand(user, msg) {
       showToast(`[${user}] Muted all`);
       break;
     }
-    case 'play': {
-      // !play             — try to play every stream
-      // !play slot1       — try to play just that slot
-      // !play cheeseball  — try to play the slot showing that channel
-      //
-      // Chat is NOT a user gesture, so .play() will succeed only when the
-      // page has already been activated (the operator has clicked the big
-      // "Start / Restart All Streams" button at least once this session).
-      // Earlier versions of this command rebuilt the iframe, hoping a fresh
-      // autoplay would unstick things — in practice that just refreshed
-      // without ever playing, because the browser still had no gesture to
-      // honour. We now just forward to the shared helper that calls
-      // play()/setMuted() on the existing players; one path, one bug
-      // surface, and chat works for the rest of the session the moment the
-      // operator presses the button.
-      const target = (args[0] || '').trim();
-      if (!target) {
-        startAllStreams();
-        showToast(`[${user}] !play — if nothing started, press the Start Streams button once`);
-        break;
-      }
-      let panel = null;
-      if (/^(slot|text)\d+$/i.test(target)) {
-        const id = (/^text/i.test(target) ? 'text' : 'slot') + target.match(/\d+/)[0];
-        panel = panels.find(p => p.presetName === id);
-      } else if (/^\d+$/.test(target)) {
-        const n = parseInt(target, 10);
-        const streams = panels.filter(p => p.type === 'stream');
-        panel = streams[n - 1] || panels[n - 1];
-      } else {
-        const ch = target.toLowerCase().replace(/^@/, '');
-        panel = panels.find(p => (p.channel || '').toLowerCase() === ch);
-      }
-      if (!panel) {
-        showToast(`[${user}] No stream at ${target}`);
-        break;
-      }
-      if (panel.type !== 'stream') {
-        showToast(`[${user}] ${target} isn't a stream slot`);
-        break;
-      }
-      if (!panel.channel) {
-        showToast(`[${user}] ${target} has no channel yet`);
-        break;
-      }
-      const entry = panelElements.get(panel.id);
-      if (entry && entry.player) {
-        try {
-          if (entry.player.setMuted) entry.player.setMuted(true);
-          if (entry.player.play) entry.player.play();
-        } catch (e) {}
-      }
-      showToast(`[${user}] Played ${panel.channel} — press Start Streams if it stays frozen`);
-      break;
-    }
     case 'sync': {
       // Reload all stream iframes by re-initing players
       for (const [id, entry] of panelElements) {
@@ -3835,102 +3717,6 @@ function applyConfigFromString(input, user) {
     applyConfig(config, user);
   } catch (e) {
     showToast(`[${user}] Invalid config`);
-  }
-}
-
-// Sidebar "Start / Restart All Streams" button. Must be called from a real
-// click handler — the browser's autoplay policy only honours .play() when
-// the current task is a user-gesture task. We call setChannel + play
-// SYNCHRONOUSLY on every ready player so the gesture is still active when
-// each call reaches the SDK; replacing the whole iframe (as earlier
-// attempts did) burns the gesture window on DOM work before the new iframe
-// is even READY.
-//
-// Panels whose player was never built — because their channel was empty
-// at page load — get built now, under the gesture, so the fresh iframe's
-// internal autoplay can use that activation too.
-function startAllStreams() {
-  // Diagnostic report so we can SEE why nothing played, when the obvious
-  // story (click = play) doesn't match reality. Shows in a persistent panel
-  // on screen rather than in a 2-second toast, so the operator can read it
-  // and relay what happened.
-  const report = [];
-  const streams = panels.filter(p => p.type === 'stream' && p.channel);
-  report.push('panels total: ' + panels.length);
-  report.push('streams with channel: ' + streams.length);
-  report.push('userActivation.isActive: ' + (navigator.userActivation && navigator.userActivation.isActive));
-  report.push('userActivation.hasBeenActive: ' + (navigator.userActivation && navigator.userActivation.hasBeenActive));
-
-  if (!streams.length) {
-    report.push('→ no streams to play');
-    showDebug(report.join('\n'));
-    return;
-  }
-
-  let played = 0, missingPlayer = 0, missingEntry = 0, threw = 0;
-  streams.forEach(p => {
-    const entry = panelElements.get(p.id);
-    if (!entry) { missingEntry++; return; }
-    if (!entry.player) {
-      initPanelPlayer(entry, p);
-      report.push(p.presetName + ' (' + p.channel + '): built fresh player');
-      played++;
-      return;
-    }
-    const hasPlay = typeof entry.player.play === 'function';
-    const hasMuted = typeof entry.player.setMuted === 'function';
-    try {
-      if (hasMuted) entry.player.setMuted(true);
-      if (hasPlay) entry.player.play();
-      // Also fire synthetic clicks at the iframe's centre. These are
-      // isTrusted:false so the browser won't count them as user gestures
-      // for autoplay, and cross-origin iframes won't surface them to the
-      // Twitch content either — but you asked to try, so here's the try,
-      // and the diagnostic will show whether anything moved.
-      const iframe = entry.el && entry.el.querySelector('iframe');
-      let clickSummary = 'no iframe';
-      if (iframe) {
-        const r = iframe.getBoundingClientRect();
-        const cx = r.left + r.width / 2;
-        const cy = r.top + r.height / 2;
-        const opts = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 };
-        iframe.dispatchEvent(new MouseEvent('mousedown', opts));
-        iframe.dispatchEvent(new MouseEvent('mouseup', opts));
-        iframe.dispatchEvent(new MouseEvent('click', opts));
-        clickSummary = 'at (' + Math.round(cx) + ',' + Math.round(cy) + ')';
-      }
-      report.push(p.presetName + ' (' + p.channel + '): setMuted=' + hasMuted + ' play=' + hasPlay + ' click=' + clickSummary);
-      played++;
-    } catch (e) {
-      threw++;
-      report.push(p.presetName + ' (' + p.channel + '): THREW ' + e.message);
-    }
-  });
-  report.push('→ played=' + played + ' missingEntry=' + missingEntry + ' missingPlayer=' + missingPlayer + ' threw=' + threw);
-  showDebug(report.join('\n'));
-}
-
-// On-screen debug panel so startAllStreams can report what it saw. Click to
-// dismiss. Lives outside the toast system because toasts fade in 2s and
-// clip multi-line text.
-function showDebug(text) {
-  let el = document.getElementById('debug-panel');
-  if (!el) {
-    el = document.createElement('pre');
-    el.id = 'debug-panel';
-    el.style.cssText = 'position:fixed; left:12px; bottom:12px; max-width:520px; max-height:40vh; overflow:auto; background:rgba(0,0,0,0.9); color:#9ff; border:1px solid #099; padding:10px; font:12px/1.4 monospace; z-index:99999; white-space:pre-wrap; cursor:pointer; border-radius:4px;';
-    el.title = 'Click to dismiss';
-    el.onclick = () => el.remove();
-    document.body.appendChild(el);
-  }
-  el.textContent = text;
-}
-
-function playAllStreams() {
-  for (const [id, entry] of panelElements) {
-    if (entry.player && entry.player.play) {
-      try { entry.player.play(); } catch (e) {}
-    }
   }
 }
 
