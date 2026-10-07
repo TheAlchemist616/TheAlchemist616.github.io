@@ -628,7 +628,7 @@
       <code>!change &lt;old&gt; &lt;new&gt;</code> — swap streamer<br>
       <code>!set &lt;slot#&gt; &lt;new&gt;</code> — set slot (stream/url/text)<br>
       <code>!text &lt;text&gt;</code> — add text box<br>
-      <code>!settext &lt;slot#|text&lt;N&gt;&gt; &lt;text&gt;</code> — update a text box (or <code>!label text1 Alchemist</code>)<br>
+      <code>!label &lt;N&gt; &lt;text&gt;</code> — write a label into text box N (also <code>!settext</code>; <code>text&lt;N&gt;</code> works too)<br>
       <code>!zoom &lt;channel&gt; &lt;1-8&gt;</code><br>
       <code>!pan &lt;channel&gt; &lt;x%&gt; &lt;y%&gt;</code><br>
       <code>!timer &lt;category/room&gt;</code> — set racetime 1 (<code>!timer off</code> removes it)<br>
@@ -1683,15 +1683,22 @@ function buildPanelListItem(p) {
   item.onclick = () => { selectedId = p.id; renderAll(); };
 
   const num = document.createElement('span');
-  // Label the row with the panel's slot/text identity when it has one
-  // (slot1 / text3 / preset name) — a bare 1-indexed number was fine when
-  // every panel was a stream, but once there are two parallel lists the
-  // original index stops matching what the operator typed in chat.
-  const panelIdx = panels.indexOf(p) + 1;
-  num.textContent = p.presetName ? p.presetName : (panelIdx + '.');
+  // Each list restarts at 1 so stream 1 and text 1 pair up at a glance —
+  // the user's "text box 1 goes with stream 1" shorthand reads directly off
+  // the sidebar now. The column heading (Streams / Text Boxes) disambiguates;
+  // the full slot/text identity is still kept in the tooltip for anyone
+  // typing a chat command.
+  const kindList = p.type === 'text'
+    ? panels.filter(x => x.type === 'text')
+    : panels.filter(x => x.type !== 'text');
+  const kindIdx = kindList.indexOf(p) + 1;
+  num.textContent = kindIdx;
+  num.title = p.presetName || '';
   num.style.color = '#888';
-  num.style.fontSize = '11px';
-  num.style.minWidth = '42px';
+  num.style.fontSize = '12px';
+  num.style.fontWeight = '600';
+  num.style.minWidth = '20px';
+  num.style.textAlign = 'right';
   num.style.whiteSpace = 'nowrap';
 
   const inp = document.createElement('input');
@@ -3349,11 +3356,12 @@ function handleCommand(user, msg) {
     }
     case 'settext':
     case 'label': {
-      // !settext <slot#|text<N>|slot<N>> <new text>
-      // Accept a panel-list index (legacy) OR a Zelda text/stream slot name
-      // (text2, slot1). Slot names look up the panel bound to that
-      // presetName, which survives layout changes; raw numbers still work
-      // for pre-Zelda setups.
+      // !settext <N|text<N>|slot<N>> <new text>
+      // The command is clearly a label operation, so a bare number resolves
+      // to text<N> first — matching the sidebar's "Text Boxes 1..M" numbering.
+      // We fall back to the panel-list index only if no text panel exists
+      // at that number (so the pre-Zelda !settext behaviour still works for
+      // layouts where text panels were added one at a time).
       const target = args[0] || '';
       const newText = args.slice(1).join(' ');
       if (!target || !newText) break;
@@ -3363,7 +3371,10 @@ function handleCommand(user, msg) {
         panel = panels.find(p => p.presetName === identity);
       } else {
         const n = parseInt(target, 10);
-        if (n > 0) panel = panels[n - 1];
+        if (n > 0) {
+          const textPanels = panels.filter(p => p.type === 'text');
+          panel = textPanels[n - 1] || panels[n - 1];
+        }
       }
       if (panel && panel.type === 'text') {
         panel.text = newText;
