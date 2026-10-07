@@ -526,29 +526,6 @@
   <h2>Overlay Editor</h2>
 
   <div class="sidebar-section">
-    <h3>Frame Overlay</h3>
-    <input type="file" id="frame-upload" accept="image/*" style="display:none;" onchange="loadFrameImage(this)">
-    <button class="btn" style="width:100%; margin-bottom:6px;" onclick="document.getElementById('frame-upload').click()">Upload Frame Image</button>
-    <div class="sidebar-row">
-      <input type="text" id="frame-url" placeholder="or paste image URL...">
-    </div>
-    <div class="sidebar-row" style="gap:4px;">
-      <button class="btn btn-sm btn-primary" onclick="loadFrameFromURL()">Load URL</button>
-    </div>
-    <div class="sidebar-row" id="frame-controls" style="display:none; margin-top:6px;">
-      <button class="btn btn-sm" onclick="toggleFrameOpacity()">Opacity: <span id="frame-opacity-label">50%</span></button>
-      <button class="btn btn-sm btn-danger" onclick="removeFrameImage()">Remove</button>
-    </div>
-    <div class="sidebar-row" id="frame-layer-controls" style="display:none;">
-      <label style="min-width:40px;">Layer</label>
-      <button class="btn btn-sm" onclick="setFrameLayer('front')">Front</button>
-      <button class="btn btn-sm" onclick="setFrameLayer('normal')">Default</button>
-      <button class="btn btn-sm" onclick="setFrameLayer('back')">Back</button>
-    </div>
-    <p style="font-size:11px; color:#666;">Upload a file or paste an image URL to show your OBS frame over the canvas.</p>
-  </div>
-
-  <div class="sidebar-section">
     <h3>Zelda Layout</h3>
     <p style="font-size:11px; color:#888; margin:0 0 6px;">Preset layouts for the Zelda II frame image. Loads the matching background on top, sets up blank-channel stream panels in the big holes (slot1..slotN), and empty text panels in the banner strips (text1..textM — the 2-slot layout has 2, the 4-slot has 4, the 6-slot has none). Fill channels / text in afterwards, or push them in via chat with <code>!load &lt;preset&gt; slot1</code> or <code>!label text1 Alchemist</code>.</p>
     <div class="sidebar-row" style="gap:4px;">
@@ -557,93 +534,6 @@
       <button class="btn btn-sm" onclick="applyZeldaLayout(6)">6 slots</button>
     </div>
     <div id="zelda-active-note" style="font-size:11px; color:#888; margin-top:4px;">No Zelda layout active.</div>
-  </div>
-
-  <div class="sidebar-section">
-    <h3>Presets</h3>
-    <div class="preset-grid" id="preset-buttons"></div>
-    <button class="btn btn-primary" style="width:100%; margin-top:6px;" onclick="addPanel()">+ Add Stream</button>
-    <button class="btn" style="width:100%; margin-top:4px;" onclick="addURLPanel()">+ Add URL Panel</button>
-    <button class="btn" style="width:100%; margin-top:4px;" onclick="addTextPanel()">+ Add Text Box</button>
-  </div>
-
-  <div class="sidebar-section">
-    <h3>Streamer Permanent Link</h3>
-    <div id="gh-token-setup">
-      <p style="font-size:11px; color:#999; margin-bottom:6px;">
-        <b>One-time setup:</b><br>
-        1. <a href="https://github.com/settings/tokens/new?scopes=gist&description=Multi-Stream+Overlay" target="_blank" style="color:#00d4ff;">Open GitHub token page &rarr;</a><br>
-        2. Scroll down, click <b>Generate token</b><br>
-        3. Copy the token (starts with <code>ghp_</code>) and paste below:
-      </p>
-      <div class="sidebar-row">
-        <input type="password" id="gh-token" placeholder="ghp_...">
-      </div>
-      <div class="sidebar-row">
-        <button class="btn btn-sm btn-primary" onclick="saveGHToken()">Save Token</button>
-        <span style="font-size:11px; color:#888;">Stored only in your browser</span>
-      </div>
-    </div>
-    <div id="gh-link-controls" style="display:none;">
-      <div class="sidebar-row">
-        <label style="min-width:60px;">Streamer</label>
-        <select id="streamer-select" onchange="onStreamerSelect()" style="flex:1;">
-          <option value="">— select —</option>
-        </select>
-      </div>
-      <div class="sidebar-row" style="gap:4px; flex-wrap:wrap;">
-        <button class="btn btn-sm btn-primary" onclick="addNewStreamer()">+ New Streamer</button>
-        <button class="btn btn-sm" onclick="pushStreamerUpdate()">Push Update</button>
-        <button class="btn btn-sm" onclick="copyStreamerLink()">Copy Streamer URL</button>
-      </div>
-      <div class="sidebar-row" style="gap:4px;">
-        <button class="btn btn-sm" onclick="refreshRegistry()">Refresh List</button>
-        <button class="btn btn-sm btn-danger" onclick="removeCurrentStreamer()">Delete Streamer</button>
-        <button class="btn btn-sm btn-danger" onclick="clearGHToken()">Reset Token</button>
-      </div>
-      <input type="hidden" id="cloud-url">
-    </div>
-    <div id="blob-status" style="font-size:11px; color:#666; margin-top:4px;"></div>
-  </div>
-
-  <div class="sidebar-section">
-    <h3>Twitch Chat Commands</h3>
-    <div class="sidebar-row">
-      <input type="text" id="chat-channel" placeholder="twitch channel name (e.g. thealchemist616)">
-    </div>
-    <div class="sidebar-row" style="gap:4px;">
-      <button class="btn btn-sm btn-primary" onclick="connectChat()">Connect</button>
-      <button class="btn btn-sm btn-danger" onclick="disconnectChat()">Disconnect</button>
-      <button class="btn btn-sm" onclick="toggleCommandHelp()">Commands</button>
-    </div>
-    <div id="chat-status" style="font-size:11px; color:#666; margin-top:4px;">Not connected</div>
-    <div id="command-help" style="display:none; font-size:11px; color:#aaa; margin-top:6px; background:#0d0d1a; padding:8px; border-radius:4px; line-height:1.5;">
-      <b style="color:#00d4ff;">Broadcaster + mods only:</b><br>
-      <code>!audio &lt;channel&gt;</code> — switch audio<br>
-      <code>!mute</code> — mute all streams<br>
-      <code>!sync</code> — reload all streams<br>
-      <code>!layout &lt;cols&gt;x&lt;rows&gt;</code> — e.g. 3x2<br>
-      <code>!add &lt;channel&gt;</code> — add stream<br>
-      <code>!remove &lt;channel&gt;</code> — remove stream<br>
-      <code>!change &lt;old&gt; &lt;new&gt;</code> — swap streamer<br>
-      <code>!set &lt;slot#&gt; &lt;new&gt;</code> — set slot (stream/url/text)<br>
-      <code>!text &lt;text&gt;</code> — add text box<br>
-      <code>!label &lt;N&gt; &lt;text&gt;</code> — write a label into text box N (also <code>!settext</code>; <code>text&lt;N&gt;</code> works too)<br>
-      <code>!zoom &lt;channel&gt; &lt;1-8&gt;</code><br>
-      <code>!pan &lt;channel&gt; &lt;x%&gt; &lt;y%&gt;</code><br>
-      <code>!timer &lt;category/room&gt;</code> — set racetime 1 (<code>!timer off</code> removes it)<br>
-      <code>!timer2 &lt;category/room&gt;</code> — set racetime 2 (<code>!timer2 off</code> removes it)<br>
-      <code>!timer</code> — force-refresh BOTH clocks (unstick the display)<br>
-      <code>!frame &lt;url&gt;</code> — load frame image<br>
-      <code>!frame off</code> — remove frame<br>
-      <code>!config &lt;url/hash&gt;</code> — load full config<br>
-      <code>!reload</code> — pull latest config from cloud<br>
-      <code>!sync</code> — re-sync all stream players<br>
-      <code>!load &lt;preset&gt; [slot&lt;N&gt;|text&lt;N&gt;]</code> — drop a preset; the slot/text name positions it<br>
-      <code>!presets</code> — list saved preset names<br>
-      <code>!layer &lt;n|next|prev&gt;</code> — bring a numbered layer forward<br>
-      <code>!zelda &lt;2|4|6&gt;</code> — apply a Zelda frame layout (streams slot1..slotN plus text1..textM for the banner strips)</code>
-    </div>
   </div>
 
   <div class="sidebar-section">
@@ -875,6 +765,116 @@
       <label style="min-width:40px;">Layer #</label>
       <input type="number" id="det-layernum" min="1" max="99" step="1" value="1" style="width:60px;" onchange="setSelectedLayerNum(parseInt(this.value) || 1)">
       <span style="font-size:11px; color:#888;">Which numbered layer this panel belongs to</span>
+    </div>
+  </div>
+
+  <div class="sidebar-section">
+    <h3>Frame Overlay</h3>
+    <input type="file" id="frame-upload" accept="image/*" style="display:none;" onchange="loadFrameImage(this)">
+    <button class="btn" style="width:100%; margin-bottom:6px;" onclick="document.getElementById('frame-upload').click()">Upload Frame Image</button>
+    <div class="sidebar-row">
+      <input type="text" id="frame-url" placeholder="or paste image URL...">
+    </div>
+    <div class="sidebar-row" style="gap:4px;">
+      <button class="btn btn-sm btn-primary" onclick="loadFrameFromURL()">Load URL</button>
+    </div>
+    <div class="sidebar-row" id="frame-controls" style="display:none; margin-top:6px;">
+      <button class="btn btn-sm" onclick="toggleFrameOpacity()">Opacity: <span id="frame-opacity-label">50%</span></button>
+      <button class="btn btn-sm btn-danger" onclick="removeFrameImage()">Remove</button>
+    </div>
+    <div class="sidebar-row" id="frame-layer-controls" style="display:none;">
+      <label style="min-width:40px;">Layer</label>
+      <button class="btn btn-sm" onclick="setFrameLayer('front')">Front</button>
+      <button class="btn btn-sm" onclick="setFrameLayer('normal')">Default</button>
+      <button class="btn btn-sm" onclick="setFrameLayer('back')">Back</button>
+    </div>
+    <p style="font-size:11px; color:#666;">Upload a file or paste an image URL to show your OBS frame over the canvas.</p>
+  </div>
+
+  <div class="sidebar-section">
+    <h3>Presets</h3>
+    <div class="preset-grid" id="preset-buttons"></div>
+    <button class="btn btn-primary" style="width:100%; margin-top:6px;" onclick="addPanel()">+ Add Stream</button>
+    <button class="btn" style="width:100%; margin-top:4px;" onclick="addURLPanel()">+ Add URL Panel</button>
+    <button class="btn" style="width:100%; margin-top:4px;" onclick="addTextPanel()">+ Add Text Box</button>
+  </div>
+
+  <div class="sidebar-section">
+    <h3>Streamer Permanent Link</h3>
+    <div id="gh-token-setup">
+      <p style="font-size:11px; color:#999; margin-bottom:6px;">
+        <b>One-time setup:</b><br>
+        1. <a href="https://github.com/settings/tokens/new?scopes=gist&description=Multi-Stream+Overlay" target="_blank" style="color:#00d4ff;">Open GitHub token page &rarr;</a><br>
+        2. Scroll down, click <b>Generate token</b><br>
+        3. Copy the token (starts with <code>ghp_</code>) and paste below:
+      </p>
+      <div class="sidebar-row">
+        <input type="password" id="gh-token" placeholder="ghp_...">
+      </div>
+      <div class="sidebar-row">
+        <button class="btn btn-sm btn-primary" onclick="saveGHToken()">Save Token</button>
+        <span style="font-size:11px; color:#888;">Stored only in your browser</span>
+      </div>
+    </div>
+    <div id="gh-link-controls" style="display:none;">
+      <div class="sidebar-row">
+        <label style="min-width:60px;">Streamer</label>
+        <select id="streamer-select" onchange="onStreamerSelect()" style="flex:1;">
+          <option value="">— select —</option>
+        </select>
+      </div>
+      <div class="sidebar-row" style="gap:4px; flex-wrap:wrap;">
+        <button class="btn btn-sm btn-primary" onclick="addNewStreamer()">+ New Streamer</button>
+        <button class="btn btn-sm" onclick="pushStreamerUpdate()">Push Update</button>
+        <button class="btn btn-sm" onclick="copyStreamerLink()">Copy Streamer URL</button>
+      </div>
+      <div class="sidebar-row" style="gap:4px;">
+        <button class="btn btn-sm" onclick="refreshRegistry()">Refresh List</button>
+        <button class="btn btn-sm btn-danger" onclick="removeCurrentStreamer()">Delete Streamer</button>
+        <button class="btn btn-sm btn-danger" onclick="clearGHToken()">Reset Token</button>
+      </div>
+      <input type="hidden" id="cloud-url">
+    </div>
+    <div id="blob-status" style="font-size:11px; color:#666; margin-top:4px;"></div>
+  </div>
+
+  <div class="sidebar-section">
+    <h3>Twitch Chat Commands</h3>
+    <div class="sidebar-row">
+      <input type="text" id="chat-channel" placeholder="twitch channel name (e.g. thealchemist616)">
+    </div>
+    <div class="sidebar-row" style="gap:4px;">
+      <button class="btn btn-sm btn-primary" onclick="connectChat()">Connect</button>
+      <button class="btn btn-sm btn-danger" onclick="disconnectChat()">Disconnect</button>
+      <button class="btn btn-sm" onclick="toggleCommandHelp()">Commands</button>
+    </div>
+    <div id="chat-status" style="font-size:11px; color:#666; margin-top:4px;">Not connected</div>
+    <div id="command-help" style="display:none; font-size:11px; color:#aaa; margin-top:6px; background:#0d0d1a; padding:8px; border-radius:4px; line-height:1.5;">
+      <b style="color:#00d4ff;">Broadcaster + mods only:</b><br>
+      <code>!audio &lt;channel&gt;</code> — switch audio<br>
+      <code>!mute</code> — mute all streams<br>
+      <code>!sync</code> — reload all streams<br>
+      <code>!layout &lt;cols&gt;x&lt;rows&gt;</code> — e.g. 3x2<br>
+      <code>!add &lt;channel&gt;</code> — add stream<br>
+      <code>!remove &lt;channel&gt;</code> — remove stream<br>
+      <code>!change &lt;old&gt; &lt;new&gt;</code> — swap streamer<br>
+      <code>!set &lt;slot#&gt; &lt;new&gt;</code> — set slot (stream/url/text)<br>
+      <code>!text &lt;text&gt;</code> — add text box<br>
+      <code>!label &lt;N&gt; &lt;text&gt;</code> — write a label into text box N (also <code>!settext</code>; <code>text&lt;N&gt;</code> works too)<br>
+      <code>!zoom &lt;channel&gt; &lt;1-8&gt;</code><br>
+      <code>!pan &lt;channel&gt; &lt;x%&gt; &lt;y%&gt;</code><br>
+      <code>!timer &lt;category/room&gt;</code> — set racetime 1 (<code>!timer off</code> removes it)<br>
+      <code>!timer2 &lt;category/room&gt;</code> — set racetime 2 (<code>!timer2 off</code> removes it)<br>
+      <code>!timer</code> — force-refresh BOTH clocks (unstick the display)<br>
+      <code>!frame &lt;url&gt;</code> — load frame image<br>
+      <code>!frame off</code> — remove frame<br>
+      <code>!config &lt;url/hash&gt;</code> — load full config<br>
+      <code>!reload</code> — pull latest config from cloud<br>
+      <code>!sync</code> — re-sync all stream players<br>
+      <code>!load &lt;preset&gt; [slot&lt;N&gt;|text&lt;N&gt;]</code> — drop a preset; the slot/text name positions it<br>
+      <code>!presets</code> — list saved preset names<br>
+      <code>!layer &lt;n|next|prev&gt;</code> — bring a numbered layer forward<br>
+      <code>!zelda &lt;2|4|6&gt;</code> — apply a Zelda frame layout (streams slot1..slotN plus text1..textM for the banner strips)</code>
     </div>
   </div>
 
