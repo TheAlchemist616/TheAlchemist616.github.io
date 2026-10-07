@@ -79,6 +79,10 @@
      stacking context; manual .layer-front / .layer-back still win via !important. */
   .panel.layer-num-active { z-index: 500; }
   .panel.layer-num-inactive { z-index: 50; }
+  /* "topmost" — above even a layer-front frame image (z-index 999). Used
+     for text panels on 6Zelda, which sit over the OPAQUE brick-ledge area
+     of the frame rather than through a transparent hole. */
+  .panel.layer-topmost { z-index: 1500 !important; }
   #race-timer.layer-front { z-index: 999 !important; }
   #race-timer.layer-back { z-index: 1 !important; }
   #race-timer-2.layer-front { z-index: 999 !important; }
@@ -546,7 +550,7 @@
 
   <div class="sidebar-section">
     <h3>Zelda Layout</h3>
-    <p style="font-size:11px; color:#888; margin:0 0 6px;">Preset layouts for the Zelda II frame image. Loads the matching background on top and sets up blank-channel panels in each hole. Fill the channels in afterwards, or push streams in via chat with <code>!load &lt;preset&gt; slot&lt;N&gt;</code>.</p>
+    <p style="font-size:11px; color:#888; margin:0 0 6px;">Preset layouts for the Zelda II frame image. Loads the matching background on top, sets up blank-channel stream panels in the big holes (slot1..slotN), and empty text panels in the banner strips (text1..textM — the 2-slot layout has 2, the 4-slot has 4, the 6-slot has none). Fill channels / text in afterwards, or push them in via chat with <code>!load &lt;preset&gt; slot1</code> or <code>!label text1 Alchemist</code>.</p>
     <div class="sidebar-row" style="gap:4px;">
       <button class="btn btn-sm" onclick="applyZeldaLayout(2)">2 slots</button>
       <button class="btn btn-sm" onclick="applyZeldaLayout(4)">4 slots</button>
@@ -624,7 +628,7 @@
       <code>!change &lt;old&gt; &lt;new&gt;</code> — swap streamer<br>
       <code>!set &lt;slot#&gt; &lt;new&gt;</code> — set slot (stream/url/text)<br>
       <code>!text &lt;text&gt;</code> — add text box<br>
-      <code>!settext &lt;slot#&gt; &lt;text&gt;</code> — update text<br>
+      <code>!settext &lt;slot#|text&lt;N&gt;&gt; &lt;text&gt;</code> — update a text box (or <code>!label text1 Alchemist</code>)<br>
       <code>!zoom &lt;channel&gt; &lt;1-8&gt;</code><br>
       <code>!pan &lt;channel&gt; &lt;x%&gt; &lt;y%&gt;</code><br>
       <code>!timer &lt;category/room&gt;</code> — set racetime 1 (<code>!timer off</code> removes it)<br>
@@ -635,10 +639,10 @@
       <code>!config &lt;url/hash&gt;</code> — load full config<br>
       <code>!reload</code> — pull latest config from cloud<br>
       <code>!sync</code> — re-sync all stream players<br>
-      <code>!load &lt;preset&gt; [slot&lt;N&gt;]</code> — drop a preset; with slot<N> it uses that Zelda slot's position<br>
+      <code>!load &lt;preset&gt; [slot&lt;N&gt;|text&lt;N&gt;]</code> — drop a preset; the slot/text name positions it<br>
       <code>!presets</code> — list saved preset names<br>
       <code>!layer &lt;n|next|prev&gt;</code> — bring a numbered layer forward<br>
-      <code>!zelda &lt;2|4|6&gt;</code> — apply a Zelda frame layout with that many slots</code>
+      <code>!zelda &lt;2|4|6&gt;</code> — apply a Zelda frame layout (streams slot1..slotN plus text1..textM for the banner strips)</code>
     </div>
   </div>
 
@@ -995,62 +999,122 @@ const panelElements = new Map(); // id -> { el, iframe, channelLoaded }
 // operator can zoom from the inspector or !zoom from chat afterwards.
 // ============================================================
 const ZELDA_FRAME_URL = n => 'https://thealchemist616.github.io/' + n + 'Zelda.png';
+// Each Zelda layout now splits into two rect lists:
+//   streams[] — the big 16:9-ish holes where Twitch panels go (slot1..slotN)
+//   texts[]   — the smaller banner strips flanking the title that are the
+//               natural home for runner names and other labels (text1..textM).
+// Both were measured from the PNGs' transparent/near-white regions, filtered
+// by rectangularity (component area / bbox > 0.80) so the "LINK" letterforms
+// in the title didn't masquerade as text slots. 6Zelda has no text strips —
+// its canvas is pure stream grid.
 const ZELDA_LAYOUTS = {
-  2: [
-    { x:   45, y:  52, w: 865, h: 730 },
-    { x: 1009, y:  52, w: 865, h: 730 },
-  ],
-  4: [
-    { x:   45, y:  42, w: 545, h: 455 },
-    { x: 1330, y:  42, w: 545, h: 455 },
-    { x:   45, y: 585, w: 545, h: 455 },
-    { x: 1330, y: 585, w: 545, h: 455 },
-  ],
-  6: [
-    { x:   45, y:  42, w: 545, h: 455 },
-    { x:  687, y:  42, w: 545, h: 455 },
-    { x: 1330, y:  42, w: 545, h: 455 },
-    { x:   45, y: 585, w: 545, h: 455 },
-    { x:  687, y: 585, w: 545, h: 455 },
-    { x: 1330, y: 585, w: 545, h: 455 },
-  ],
+  2: {
+    streams: [
+      { x:   45, y:  52, w: 865, h: 730 },
+      { x: 1009, y:  52, w: 865, h: 730 },
+    ],
+    texts: [
+      { x:   45, y: 907, w: 591, h: 120 },
+      { x: 1284, y: 907, w: 591, h: 120 },
+    ],
+    // 2Zelda and 4Zelda text slots sit in transparent cutouts in the frame
+    // — streams aren't underneath, so black on the (whatever) backing reads
+    // cleanly. layer stays normal so the frame can still draw over any
+    // overflow from a mispositioned stream.
+    textDefaults: { color: '#000000', bgTransparent: true, layer: null },
+  },
+  4: {
+    streams: [
+      { x:   45, y:  42, w: 545, h: 455 },
+      { x: 1330, y:  42, w: 545, h: 455 },
+      { x:   45, y: 585, w: 545, h: 455 },
+      { x: 1330, y: 585, w: 545, h: 455 },
+    ],
+    texts: [
+      { x:  663, y:  42, w: 254, h:  81 },
+      { x: 1002, y:  42, w: 254, h:  81 },
+      { x:  663, y: 959, w: 254, h:  81 },
+      { x: 1002, y: 959, w: 254, h:  81 },
+    ],
+    textDefaults: { color: '#000000', bgTransparent: true, layer: null },
+  },
+  6: {
+    streams: [
+      { x:   45, y:  42, w: 545, h: 455 },
+      { x:  687, y:  42, w: 545, h: 455 },
+      { x: 1330, y:  42, w: 545, h: 455 },
+      { x:   45, y: 585, w: 545, h: 455 },
+      { x:  687, y: 585, w: 545, h: 455 },
+      { x: 1330, y: 585, w: 545, h: 455 },
+    ],
+    // 6Zelda has no dedicated text strips — the whole canvas is stream
+    // grid. The user asked for labels in the bottom-right brick ledge of
+    // each stream, bleeding ~40px below each slot for extra height. The
+    // brick cluster was measured at (slotX+351, slotY+421, 193, 33); we
+    // extend h to 73 so the label straddles the slot bottom.
+    texts: [
+      { x:  396, y:  463, w: 193, h: 73 },
+      { x: 1038, y:  463, w: 193, h: 73 },
+      { x: 1681, y:  463, w: 193, h: 73 },
+      { x:  396, y: 1006, w: 193, h: 73 },
+      { x: 1038, y: 1006, w: 193, h: 73 },
+      { x: 1681, y: 1006, w: 193, h: 73 },
+    ],
+    // These sit OVER the brick decoration, which is part of the opaque
+    // frame image — so text has to render above the frame (layer: 'topmost'
+    // z-index 1500, defined in CSS). Default text color flips to white
+    // because the brick texture is dark.
+    textDefaults: { color: '#ffffff', bgTransparent: true, layer: 'topmost' },
+  },
 };
 
 // Which Zelda layout is applied (null = none). Used so !load <preset> <slotN>
 // knows which slot rectangle to drop a preset into.
 let currentZeldaLayout = null;
 
+// Parse a slot name like "slot3" / "text2" / "SLOT 3" into its kind and index.
+// Returns null when the string doesn't match either form. Bare numbers default
+// to the stream slot namespace since that's the common case.
+function parseSlotName(name) {
+  const s = String(name || '').trim().toLowerCase();
+  let m = s.match(/^text\s*(\d+)$/);
+  if (m) return { kind: 'text', index: parseInt(m[1], 10) - 1 };
+  m = s.match(/^(?:slot\s*)?(\d+)$/);
+  if (m) return { kind: 'stream', index: parseInt(m[1], 10) - 1 };
+  return null;
+}
+
 function slotRect(name) {
-  // Accept "slot1" / "Slot1" / "SLOT1" / bare "1". Returns null if we have no
-  // layout active or the slot number is out of range.
   if (!currentZeldaLayout) return null;
-  const m = String(name || '').match(/(\d+)/);
-  if (!m) return null;
-  const idx = parseInt(m[1], 10) - 1;
-  const rects = ZELDA_LAYOUTS[currentZeldaLayout];
-  if (!rects || idx < 0 || idx >= rects.length) return null;
-  return rects[idx];
+  const parsed = parseSlotName(name);
+  if (!parsed) return null;
+  const layout = ZELDA_LAYOUTS[currentZeldaLayout];
+  const rects = parsed.kind === 'text' ? layout.texts : layout.streams;
+  if (!rects || parsed.index < 0 || parsed.index >= rects.length) return null;
+  return rects[parsed.index];
+}
+
+// Canonical identity string for a slot name, used as presetName on the panel
+// so repeated loads into the same slot update in place.
+function slotIdentity(name) {
+  const parsed = parseSlotName(name);
+  if (!parsed) return null;
+  return (parsed.kind === 'text' ? 'text' : 'slot') + (parsed.index + 1);
 }
 
 function applyZeldaLayout(n, user) {
-  const rects = ZELDA_LAYOUTS[n];
-  if (!rects) {
+  const layout = ZELDA_LAYOUTS[n];
+  if (!layout) {
     showToast((user ? '[' + user + '] ' : '') + 'Zelda layout must be 2, 4 or 6');
     return;
   }
-  // Load the matching background and float it ABOVE the streams. The user
-  // explicitly asked for the frame to be loaded over everything, so the
-  // slot rects can be slightly loose at the corners without looking off.
   loadFrameFromURL(ZELDA_FRAME_URL(n));
   setFrameLayer('front');
 
-  // Replace existing panels with one blank-channel panel per slot. Bind each
-  // one to presetName "slot<i>" so !load <preset> slot<i> can swap channels
-  // into a slot without duplicating panels.
-  panels = rects.map((r, i) => ({
-    id: 'p' + Date.now() + '_' + i,
-    type: 'stream',
-    channel: '',
+  // Stream slots: blank-channel Twitch panels.
+  const streamPanels = layout.streams.map((r, i) => ({
+    id: 'p' + Date.now() + '_s' + i,
+    type: 'stream', channel: '',
     url: '', text: '',
     textFont: "'Arial Black', sans-serif",
     textSize: 36, textColor: '#ffffff',
@@ -1060,21 +1124,58 @@ function applyZeldaLayout(n, user) {
     layer: null, layerNum: 1,
     presetName: 'slot' + (i + 1),
   }));
+
+  // Text slots: text panels sized to each strip. Font scales with slot
+  // height so a 120-tall banner ends up roughly twice the point size of a
+  // 73-tall label without a per-layout fudge table. Style defaults
+  // (colour / layer / transparency) come from this layout's textDefaults,
+  // because 6Zelda's labels sit over opaque bricks and need a different
+  // treatment from 2/4Zelda's labels sitting in transparent cutouts.
+  const td = layout.textDefaults || { color: '#000000', bgTransparent: true, layer: null };
+  const textPanels = layout.texts.map((r, i) => ({
+    id: 't' + Date.now() + '_t' + i,
+    type: 'text', channel: '',
+    url: '', text: '',
+    textFont: "'Arial Black', sans-serif",
+    // Scale by the SMALLER of (height × 0.55) and (width / 7). Scaling only
+    // on height was fine for the 2/4-slot banners but 6Zelda's labels are
+    // 193 wide × 73 tall — a height-only font ran "ALCHEMIST" past the
+    // right edge. Arial Black at font-size S eats roughly S × 0.65 per
+    // char, so w/7 keeps a ~9-char Twitch handle on one line.
+    textSize: Math.min(72, Math.max(20, Math.min(Math.floor(r.h * 0.55), Math.floor(r.w / 7)))),
+    textColor: td.color,
+    textBg: '#000000', textBgTransparent: td.bgTransparent,
+    textAlign: 'center',
+    x: r.x, y: r.y, w: r.w, h: r.h,
+    zoom: 1, panX: 0, panY: 0,
+    layer: td.layer, layerNum: 1,
+    presetName: 'text' + (i + 1),
+  }));
+
+  panels = streamPanels.concat(textPanels);
   selectedId = null;
   cropModeId = null;
   currentZeldaLayout = n;
   updateZeldaNote();
   renderAll();
   saveConfig();
-  showToast((user ? '[' + user + '] ' : '') + 'Zelda ' + n + '-slot layout applied');
+  const streamsN = layout.streams.length;
+  const textsN = layout.texts.length;
+  const extras = textsN ? (', ' + textsN + ' text slot' + (textsN === 1 ? '' : 's')) : '';
+  showToast((user ? '[' + user + '] ' : '') + 'Zelda ' + n + '-slot layout applied (' + streamsN + ' streams' + extras + ')');
 }
 
 function updateZeldaNote() {
   const note = document.getElementById('zelda-active-note');
   if (!note) return;
-  note.textContent = currentZeldaLayout
-    ? 'Active: ' + currentZeldaLayout + '-slot (' + ZELDA_LAYOUTS[currentZeldaLayout].length + ' slots named slot1..slot' + ZELDA_LAYOUTS[currentZeldaLayout].length + ')'
-    : 'No Zelda layout active.';
+  if (!currentZeldaLayout) {
+    note.textContent = 'No Zelda layout active.';
+    return;
+  }
+  const layout = ZELDA_LAYOUTS[currentZeldaLayout];
+  const parts = ['slot1..slot' + layout.streams.length];
+  if (layout.texts.length) parts.push('text1..text' + layout.texts.length);
+  note.textContent = 'Active: ' + currentZeldaLayout + '-slot (' + parts.join(', ') + ')';
 }
 
 // ============================================================
@@ -1201,7 +1302,7 @@ function loadPresetByName(name, user, slotName) {
     showToast((user ? '[' + user + '] ' : '') + 'No slot "' + slotName + '" in the active layout');
     return false;
   }
-  const identity = slotName ? ('slot' + String(slotName).match(/\d+/)[0]) : name;
+  const identity = slotName ? slotIdentity(slotName) : name;
   let p = panels.find(x => x.presetName === identity);
   if (!p) {
     p = {
@@ -2015,7 +2116,10 @@ function setPanelLayer(layer) {
   p.layer = (layer === 'normal') ? null : layer;
   const entry = panelElements.get(p.id);
   if (entry && entry.el) {
-    entry.el.classList.remove('layer-front', 'layer-back');
+    // Strip EVERY layer-* class so clicking Normal cleans up any override
+    // that was applied earlier (including 'topmost', which Zelda 6 adds
+    // to its text panels).
+    entry.el.classList.remove('layer-front', 'layer-back', 'layer-topmost');
     if (p.layer) entry.el.classList.add('layer-' + p.layer);
   }
   saveConfig();
@@ -3202,18 +3306,34 @@ function handleCommand(user, msg) {
       showToast(`[${user}] Text added`);
       break;
     }
-    case 'settext': {
-      // !settext <slot#> <new text>
-      const slot = parseInt(args[0]);
+    case 'settext':
+    case 'label': {
+      // !settext <slot#|text<N>|slot<N>> <new text>
+      // Accept a panel-list index (legacy) OR a Zelda text/stream slot name
+      // (text2, slot1). Slot names look up the panel bound to that
+      // presetName, which survives layout changes; raw numbers still work
+      // for pre-Zelda setups.
+      const target = args[0] || '';
       const newText = args.slice(1).join(' ');
-      if (!slot || !newText) break;
-      const panel = panels[slot - 1];
+      if (!target || !newText) break;
+      let panel = null;
+      if (/^(text|slot)\d+$/i.test(target)) {
+        const identity = (/^text/i.test(target) ? 'text' : 'slot') + target.match(/\d+/)[0];
+        panel = panels.find(p => p.presetName === identity);
+      } else {
+        const n = parseInt(target, 10);
+        if (n > 0) panel = panels[n - 1];
+      }
       if (panel && panel.type === 'text') {
         panel.text = newText;
         updateAllPanelDOM();
         renderPanelList();
         saveConfig();
         showToast(`[${user}] Text updated`);
+      } else if (panel) {
+        showToast(`[${user}] ${target} isn't a text slot`);
+      } else {
+        showToast(`[${user}] No panel at ${target}`);
       }
       break;
     }
@@ -3368,13 +3488,13 @@ function handleCommand(user, msg) {
       } else {
         rest = args;
       }
-      // Split out a trailing slot argument. A slot looks like "slot3" or
-      // just "3" — anything else is treated as part of the preset name so
-      // multi-word preset names still work.
+      // Split out a trailing slot argument. A slot looks like "slot3",
+      // "text2", or just "3" (defaults to the stream namespace). Anything
+      // else stays part of the preset name so multi-word presets still work.
       let slotName = null;
       if (rest.length >= 2) {
         const tail = rest[rest.length - 1];
-        if (/^slot\d+$/i.test(tail)) {
+        if (/^(slot|text)\d+$/i.test(tail)) {
           slotName = tail;
           rest = rest.slice(0, -1);
         }
