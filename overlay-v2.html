@@ -853,7 +853,7 @@
       <b style="color:#00d4ff;">Broadcaster + mods only:</b><br>
       <code>!audio &lt;channel&gt;</code> — switch audio<br>
       <code>!mute</code> — mute all streams<br>
-      <code>!play [slot&lt;N&gt;|channel]</code> — press Play (every stream, or one slot/channel)<br>
+      <code>!play [slot&lt;N&gt;|channel]</code> — restart streams (rebuilds the iframe to defeat autoplay blocks)<br>
       <code>!sync</code> — reload all streams<br>
       <code>!layout &lt;cols&gt;x&lt;rows&gt;</code> — e.g. 3x2<br>
       <code>!add &lt;channel&gt;</code> — add stream<br>
@@ -1506,6 +1506,27 @@ function syncCanvasDOM() {
 // Instantiate (or re-instantiate) the Twitch.Player for a stream panel, if
 // its channel is non-empty. Called from syncCanvasDOM when the panel first
 // appears AND from updateAllPanelDOM when a blank channel first gets a value.
+// Tear down the current Twitch.Player for a panel and build a fresh one.
+// Used by !play: calling .play() on an already-created iframe is blocked by
+// the browser's autoplay policy when the trigger is a chat message (no user
+// gesture). A brand-new iframe gets a fresh autoplay evaluation; muted
+// autoplay is universally allowed, so this usually succeeds where .play()
+// didn't. Keeps the panel's channel/geometry/audio state intact.
+function rebuildPlayer(panel) {
+  const entry = panelElements.get(panel.id);
+  if (!entry) return false;
+  const target = document.getElementById('tp-' + panel.id);
+  if (!target) return false;
+  // Twitch.Player's own destroy() is unreliable across SDK versions; the
+  // safest teardown is to clear the mount node, which removes the iframe
+  // and lets Twitch.Player attach a new one on the same id.
+  target.innerHTML = '';
+  entry.player = null;
+  entry.channelLoaded = null;
+  initPanelPlayer(entry, panel);
+  return !!entry.player;
+}
+
 function initPanelPlayer(entry, panel) {
   if (!panel.channel) return; // nothing to load yet; try again when a channel is set
   const target = document.getElementById('tp-' + panel.id);
@@ -3304,13 +3325,23 @@ function handleCommand(user, msg) {
       break;
     }
     case 'play': {
-      // !play             — play every stream (today's behaviour)
-      // !play slot1       — play just that slot
-      // !play cheeseball  — play the slot showing that channel
+      // !play             — rebuild every stream (fresh autoplay evaluation)
+      // !play slot1       — rebuild just that slot
+      // !play cheeseball  — rebuild the slot showing that channel
+      // A plain .play() call from chat is blocked by the browser's autoplay
+      // policy (no user gesture on a WebSocket message), so a stream stuck
+      // on its thumbnail stays stuck. Replacing the iframe triggers a fresh
+      // autoplay attempt — muted autoplay is universally allowed, so the
+      // new iframe starts rolling where .play() couldn't.
       const target = (args[0] || '').trim();
       if (!target) {
-        playAllStreams();
-        showToast(`[${user}] Played all streams`);
+        const streams = panels.filter(p => p.type === 'stream' && p.channel);
+        if (!streams.length) {
+          showToast(`[${user}] No streams loaded — type a channel into a slot first`);
+          break;
+        }
+        streams.forEach(p => rebuildPlayer(p));
+        showToast(`[${user}] Restarted ${streams.length} stream${streams.length === 1 ? '' : 's'}`);
         break;
       }
       let panel = null;
@@ -3335,13 +3366,12 @@ function handleCommand(user, msg) {
         showToast(`[${user}] ${target} isn't a stream slot`);
         break;
       }
-      const entry = panelElements.get(panel.id);
-      if (entry && entry.player && entry.player.play) {
-        try { entry.player.play(); } catch (e) {}
-        showToast(`[${user}] Played ${panel.channel || target}`);
-      } else {
-        showToast(`[${user}] ${target} has no player yet`);
+      if (!panel.channel) {
+        showToast(`[${user}] ${target} has no channel yet`);
+        break;
       }
+      rebuildPlayer(panel);
+      showToast(`[${user}] Restarted ${panel.channel}`);
       break;
     }
     case 'sync': {
