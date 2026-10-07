@@ -74,11 +74,14 @@
   #frame-image.layer-back { z-index: 0 !important; }
   .panel.layer-front { z-index: 900 !important; }
   .panel.layer-back { z-index: 10 !important; }
-  /* Numbered layer system (separate from the manual front/back override above).
-     Panels whose layerNum matches activeLayer get bumped above the default 100
-     stacking context; manual .layer-front / .layer-back still win via !important. */
+  /* Numbered layer system — each layer is a scene. Only panels on the
+     currently-active layer are visible; the rest are hidden with
+     visibility:hidden so their Twitch iframes keep buffering (switching
+     back is instant, no reload wait). Manual .layer-front / .layer-back
+     still win visibility via the !important rules above, so a forced-front
+     panel stays forward even across layer swaps. */
   .panel.layer-num-active { z-index: 500; }
-  .panel.layer-num-inactive { z-index: 50; }
+  .panel.layer-num-inactive { visibility: hidden; pointer-events: none; }
   /* "topmost" — above even a layer-front frame image (z-index 999). Used
      for text panels on 6Zelda, which sit over the OPAQUE brick-ledge area
      of the frame rather than through a transparent hole. */
@@ -657,7 +660,7 @@
 
   <div class="sidebar-section">
     <h3>Panel Layers</h3>
-    <p style="font-size:11px; color:#888; margin:0 0 6px;">Each panel sits on a numbered layer. The active layer floats to the front; others sit behind. Switch with the buttons here or <code>!layer &lt;n&gt;</code> / <code>!layer next</code> in chat.</p>
+    <p style="font-size:11px; color:#888; margin:0 0 6px;">Each panel sits on a numbered layer. Only the active layer's panels are visible — the rest are hidden (their Twitch streams keep buffering in the background, so switching back is instant). Audio from hidden panels is muted. Switch with the buttons here or <code>!layer &lt;n&gt;</code> / <code>!layer next</code> in chat.</p>
     <div class="sidebar-row" style="gap:4px; flex-wrap:wrap;" id="layer-buttons"></div>
     <div class="sidebar-row" style="gap:4px; margin-top:4px;">
       <button class="btn btn-sm" onclick="activateLayer(getActiveLayer() - 1)">&larr; Prev</button>
@@ -1276,7 +1279,24 @@ function activateLayer(n) {
   activeLayer = n;
   updateAllPanelDOM();
   renderLayerButtons();
+  applyLayerAudio();
   saveConfig();
+}
+
+// A hidden slot shouldn't still be audible. Walk every stream panel and
+// mute/unmute based on whether its layer is active AND whether it's the
+// user's chosen audio target. The muted-when-hidden rule survives into the
+// next render by living on the player object, not on panel.muted, so the
+// user's audio target isn't lost — switching back to the layer restores it.
+function applyLayerAudio() {
+  for (const [id, entry] of panelElements) {
+    if (!entry || !entry.player || !entry.player.setMuted) continue;
+    const p = panels.find(x => x.id === id);
+    if (!p || p.type !== 'stream') continue;
+    const onActive = (p.layerNum || 1) === activeLayer;
+    const shouldHear = onActive && id === audioActiveId;
+    try { entry.player.setMuted(!shouldHear); } catch (e) {}
+  }
 }
 
 function addNewLayer() {
