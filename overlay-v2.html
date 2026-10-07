@@ -805,40 +805,23 @@
 
   <div class="sidebar-section">
     <h3>Streamer Permanent Link</h3>
-    <div id="gh-token-setup">
-      <p style="font-size:11px; color:#999; margin-bottom:6px;">
-        <b>One-time setup:</b><br>
-        1. <a href="https://github.com/settings/tokens/new?scopes=gist&description=Multi-Stream+Overlay" target="_blank" style="color:#00d4ff;">Open GitHub token page &rarr;</a><br>
-        2. Scroll down, click <b>Generate token</b><br>
-        3. Copy the token (starts with <code>ghp_</code>) and paste below:
-      </p>
-      <div class="sidebar-row">
-        <input type="password" id="gh-token" placeholder="ghp_...">
-      </div>
-      <div class="sidebar-row">
-        <button class="btn btn-sm btn-primary" onclick="saveGHToken()">Save Token</button>
-        <span style="font-size:11px; color:#888;">Stored only in your browser</span>
-      </div>
+    <p style="font-size:11px; color:#888; margin:0 0 6px;">No GitHub token. Click <b>+ New Streamer</b>, pick a slug (e.g. <code>cheeseball81</code>), and the overlay stores their config on <code>mix.luncearnnburn.com</code>. Copy the resulting URL and open it in any browser or OBS source — same config everywhere. Updates auto-sync.</p>
+    <div class="sidebar-row">
+      <label style="min-width:60px;">Streamer</label>
+      <select id="streamer-select" onchange="onStreamerSelect()" style="flex:1;">
+        <option value="">— select —</option>
+      </select>
     </div>
-    <div id="gh-link-controls" style="display:none;">
-      <div class="sidebar-row">
-        <label style="min-width:60px;">Streamer</label>
-        <select id="streamer-select" onchange="onStreamerSelect()" style="flex:1;">
-          <option value="">— select —</option>
-        </select>
-      </div>
-      <div class="sidebar-row" style="gap:4px; flex-wrap:wrap;">
-        <button class="btn btn-sm btn-primary" onclick="addNewStreamer()">+ New Streamer</button>
-        <button class="btn btn-sm" onclick="pushStreamerUpdate()">Push Update</button>
-        <button class="btn btn-sm" onclick="copyStreamerLink()">Copy Streamer URL</button>
-      </div>
-      <div class="sidebar-row" style="gap:4px;">
-        <button class="btn btn-sm" onclick="refreshRegistry()">Refresh List</button>
-        <button class="btn btn-sm btn-danger" onclick="removeCurrentStreamer()">Delete Streamer</button>
-        <button class="btn btn-sm btn-danger" onclick="clearGHToken()">Reset Token</button>
-      </div>
-      <input type="hidden" id="cloud-url">
+    <div class="sidebar-row" style="gap:4px; flex-wrap:wrap;">
+      <button class="btn btn-sm btn-primary" onclick="addNewStreamer()">+ New Streamer</button>
+      <button class="btn btn-sm" onclick="pushStreamerUpdate()">Push Update</button>
+      <button class="btn btn-sm" onclick="copyStreamerLink()">Copy Streamer URL</button>
     </div>
+    <div class="sidebar-row" style="gap:4px;">
+      <button class="btn btn-sm" onclick="importStreamerFromURL()">Import URL</button>
+      <button class="btn btn-sm btn-danger" onclick="removeCurrentStreamer()">Forget Streamer</button>
+    </div>
+    <input type="hidden" id="cloud-url">
     <div id="blob-status" style="font-size:11px; color:#666; margin-top:4px;"></div>
   </div>
 
@@ -937,36 +920,30 @@ function loadPresetsLocal() {
   } catch (e) {}
 }
 
-// Debounced auto-push of the current config (which contains streamPresets)
-// to the active streamer's gist. Fires 1.5s after the last preset edit so a
-// burst of saves — rename, tweak color, hit Save again — collapses into one
-// API call. No-op if the operator hasn't set up Streamer Permanent Link yet;
-// localStorage is the fallback in that case.
+// Debounced auto-push of the current config to the active streamer's slot
+// on the relay. Fires 1.5s after the last edit so a burst collapses into
+// one PUT. No-op without an edit secret — someone opening a read-only
+// Streamer URL on a bystander browser doesn't accidentally fight the
+// operator's writes.
 let _presetSyncTimer = null;
 let _presetSyncInFlight = false;
+function activeOperatorEntry() {
+  const e = registry[activeStreamer];
+  return (e && e.slug && e.secret) ? e : null;
+}
 function schedulePresetSync() {
-  if (!ghToken || !activeStreamer || !registry[activeStreamer]) return;
+  if (!activeOperatorEntry()) return;
   clearTimeout(_presetSyncTimer);
   _presetSyncTimer = setTimeout(flushPresetSync, 1500);
 }
 async function flushPresetSync() {
   _presetSyncTimer = null;
-  if (_presetSyncInFlight) {
-    // A push is already going out — reschedule so the latest state wins.
-    schedulePresetSync();
-    return;
-  }
-  if (!ghToken || !activeStreamer || !registry[activeStreamer]) return;
+  if (_presetSyncInFlight) { schedulePresetSync(); return; }
+  const entry = activeOperatorEntry();
+  if (!entry) return;
   _presetSyncInFlight = true;
   try {
-    const config = getConfig();
-    const r = await fetch('https://api.github.com/gists/' + registry[activeStreamer], {
-      method: 'PATCH', headers: ghHeaders(),
-      body: JSON.stringify({
-        files: { [GIST_FILENAME]: { content: JSON.stringify(config, null, 2) } },
-      }),
-    });
-    if (!r.ok) throw new Error('Status ' + r.status);
+    await putOverlayBlob(entry.slug, entry.secret, getConfig());
     showToast('Presets synced to cloud');
   } catch (e) {
     showToast('Preset sync failed: ' + e.message);
@@ -974,20 +951,16 @@ async function flushPresetSync() {
     _presetSyncInFlight = false;
   }
 }
-// Safety net — if the operator closes the tab inside the 1.5s debounce window,
-// try to flush the pending push synchronously via sendBeacon. Fire-and-forget,
-// best-effort; if it misses, localStorage still has the latest copy.
 window.addEventListener('beforeunload', () => {
   if (!_presetSyncTimer) return;
-  if (!ghToken || !activeStreamer || !registry[activeStreamer]) return;
+  const entry = activeOperatorEntry();
+  if (!entry) return;
   try {
-    const blob = new Blob([JSON.stringify({
-      files: { [GIST_FILENAME]: { content: JSON.stringify(getConfig(), null, 2) } },
-    })], { type: 'application/json' });
-    // sendBeacon can't attach custom headers, so fall back to a sync fetch
-    // keepalive. Both are best-effort during unload.
-    fetch('https://api.github.com/gists/' + registry[activeStreamer], {
-      method: 'PATCH', headers: ghHeaders(), body: blob, keepalive: true,
+    fetch(overlayURL(entry.slug), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + entry.secret },
+      body: JSON.stringify(getConfig()),
+      keepalive: true,
     });
   } catch (e) {}
 });
@@ -2811,134 +2784,43 @@ function exportURL() {
 }
 
 // ============================================================
-// CLOUD CONFIG via GitHub Gist API + Registry
+// CLOUD CONFIG via the race-relay backend.
+//
+// Each streamer is a slug (e.g. "cheeseball81") whose config lives at
+// https://mix.luncearnnburn.com/overlay/<slug>. Reads are open — a viewer
+// just needs the URL. Writes carry an edit secret in a Bearer header; the
+// relay returned that secret when the streamer was created. The secret
+// lives only in the operator's browser localStorage.
+//
+// Operator cross-browser flow: Copy Streamer URL emits a URL with #s=<secret>
+// in the fragment, which never reaches a server. Opening that URL on a new
+// browser imports the slug+secret into THAT browser's registry, so the
+// operator can push updates from any machine.
 // ============================================================
+const RELAY_HOST = 'https://mix.luncearnnburn.com';
+const OVERLAY_PATH = '/overlay/';
+
 let cloudURL = '';
-let ghToken = '';
-let registryGistID = '';      // gist that contains the streamers→gist mapping
-let registry = {};             // { streamerName: configGistID }
-let activeStreamer = '';       // currently selected streamer name
-
-const GIST_FILENAME = 'overlay-config.json';
-const REGISTRY_FILENAME = 'streamers.json';
-const REGISTRY_DESC = '[overlay-v2] streamer registry — auto-managed';
-
-function ghHeaders() {
-  return {
-    'Accept': 'application/vnd.github+json',
-    'Authorization': 'Bearer ' + ghToken,
-    'Content-Type': 'application/json',
-  };
-}
+let registry = {};        // { streamerName: {slug, secret?} }
+let activeStreamer = '';  // currently selected streamer name
 
 function setStatus(msg, color) {
   const el = document.getElementById('blob-status');
   if (el) { el.textContent = msg; el.style.color = color || '#666'; }
 }
 
-async function loadGHToken() {
-  ghToken = localStorage.getItem('overlay-gh-token') || '';
-  registryGistID = localStorage.getItem('overlay-registry-gist') || '';
-  activeStreamer = localStorage.getItem('overlay-active-streamer') || '';
-  if (ghToken) {
-    document.getElementById('gh-token-setup').style.display = 'none';
-    document.getElementById('gh-link-controls').style.display = 'block';
-    await initRegistry();
-  }
-}
+function overlayURL(slug) { return RELAY_HOST + OVERLAY_PATH + slug; }
 
-async function saveGHToken() {
-  const t = (document.getElementById('gh-token').value || '').trim();
-  if (!t.startsWith('ghp_') && !t.startsWith('github_pat_')) {
-    if (!confirm("That doesn't look like a GitHub token. Save anyway?")) return;
-  }
-  localStorage.setItem('overlay-gh-token', t);
-  ghToken = t;
-  document.getElementById('gh-token-setup').style.display = 'none';
-  document.getElementById('gh-link-controls').style.display = 'block';
-  showToast('Token saved');
-  await initRegistry();
-}
-
-function clearGHToken() {
-  if (!confirm('Remove saved token & registry reference? (Existing gists on GitHub are not deleted.)')) return;
-  localStorage.removeItem('overlay-gh-token');
-  localStorage.removeItem('overlay-registry-gist');
-  localStorage.removeItem('overlay-active-streamer');
-  ghToken = '';
-  registryGistID = '';
-  activeStreamer = '';
-  registry = {};
-  cloudURL = '';
-  document.getElementById('gh-token-setup').style.display = 'block';
-  document.getElementById('gh-link-controls').style.display = 'none';
-  document.getElementById('gh-token').value = '';
-  document.getElementById('cloud-url').value = '';
-  setStatus('');
-}
-
-// Find existing registry gist or create a new one
-// After registry loads, if URL has ?gist=<id>, auto-select that streamer
-function syncActiveStreamerFromURL() {
-  const gistParam = new URLSearchParams(window.location.search).get('gist');
-  if (!gistParam) return;
-  const match = Object.keys(registry).find(name => registry[name] === gistParam);
-  if (match) {
-    activeStreamer = match;
-    localStorage.setItem('overlay-active-streamer', match);
-    populateStreamerSelect();
-  }
-}
-
-async function initRegistry() {
-  setStatus('Loading registry...', '#ff0');
+function loadRegistry() {
   try {
-    if (!registryGistID) {
-      // Search through user's gists for one with our marker description
-      const r = await fetch('https://api.github.com/gists?per_page=100', { headers: ghHeaders() });
-      if (!r.ok) throw new Error('List gists: ' + r.status);
-      const gists = await r.json();
-      const found = gists.find(g => (g.description || '').includes('[overlay-v2] streamer registry'));
-      if (found) {
-        registryGistID = found.id;
-        localStorage.setItem('overlay-registry-gist', registryGistID);
-      } else {
-        // Create new registry gist
-        const cr = await fetch('https://api.github.com/gists', {
-          method: 'POST', headers: ghHeaders(),
-          body: JSON.stringify({
-            description: REGISTRY_DESC,
-            public: false,
-            files: { [REGISTRY_FILENAME]: { content: '{}' } },
-          }),
-        });
-        if (!cr.ok) throw new Error('Create registry: ' + cr.status);
-        const created = await cr.json();
-        registryGistID = created.id;
-        localStorage.setItem('overlay-registry-gist', registryGistID);
-      }
-    }
-    // Fetch registry contents
-    const rg = await fetch('https://api.github.com/gists/' + registryGistID, { headers: ghHeaders() });
-    if (!rg.ok) throw new Error('Fetch registry: ' + rg.status);
-    const data = await rg.json();
-    const content = data.files[REGISTRY_FILENAME]?.content || '{}';
-    try { registry = JSON.parse(content); } catch (e) { registry = {}; }
-    populateStreamerSelect();
-    syncActiveStreamerFromURL();
-    setStatus('Registry loaded (' + Object.keys(registry).length + ' streamers)', '#0f0');
-  } catch (e) {
-    // 401 from GitHub's API means the saved token is invalid, expired, or
-    // missing the gist scope — the most common failure for this feature,
-    // and the raw status code was leaving operators to guess the fix.
-    if (/\b401\b/.test(e.message)) {
-      setStatus('GitHub token invalid or expired — click Reset Token, generate a new one with the gist scope, and paste it in.', '#f44');
-    } else if (/\b403\b/.test(e.message)) {
-      setStatus('GitHub rate-limited (403). Wait a minute and press Refresh List, or Reset Token if this keeps happening.', '#f44');
-    } else {
-      setStatus('Registry error: ' + e.message, '#f44');
-    }
-  }
+    registry = JSON.parse(localStorage.getItem('overlay-registry') || '{}');
+  } catch (e) { registry = {}; }
+  activeStreamer = localStorage.getItem('overlay-active-streamer') || '';
+  populateStreamerSelect();
+}
+
+function saveRegistryLocal() {
+  try { localStorage.setItem('overlay-registry', JSON.stringify(registry)); } catch (e) {}
 }
 
 function populateStreamerSelect() {
@@ -2948,83 +2830,123 @@ function populateStreamerSelect() {
   Object.keys(registry).sort().forEach(name => {
     const opt = document.createElement('option');
     opt.value = name;
-    opt.textContent = name;
+    opt.textContent = name + (registry[name].secret ? ' ✎' : '');
     if (name === activeStreamer) opt.selected = true;
     sel.appendChild(opt);
   });
-  // Update cloud URL display
-  if (activeStreamer && registry[activeStreamer]) {
-    cloudURL = `https://gist.githubusercontent.com/raw/${registry[activeStreamer]}/${GIST_FILENAME}`;
-    document.getElementById('cloud-url').value = cloudURL;
+  const entry = registry[activeStreamer];
+  if (entry && entry.slug) {
+    cloudURL = overlayURL(entry.slug);
+    const el = document.getElementById('cloud-url');
+    if (el) el.value = cloudURL;
   }
 }
 
-async function refreshRegistry() {
-  registryGistID = localStorage.getItem('overlay-registry-gist') || '';
-  await initRegistry();
+function sanitizeSlug(s) {
+  return String(s || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
 }
 
-async function saveRegistry() {
-  const r = await fetch('https://api.github.com/gists/' + registryGistID, {
-    method: 'PATCH', headers: ghHeaders(),
-    body: JSON.stringify({
-      files: { [REGISTRY_FILENAME]: { content: JSON.stringify(registry, null, 2) } },
-    }),
+async function createOverlayBlob(slug, config) {
+  const r = await fetch(overlayURL(slug), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(config),
   });
-  if (!r.ok) throw new Error('Save registry: ' + r.status);
+  if (r.status === 409) throw new Error('Slug "' + slug + '" is already taken on the relay');
+  if (!r.ok) throw new Error('Create: ' + r.status);
+  const data = await r.json();
+  if (!data || !data.secret) throw new Error('Relay did not return a secret');
+  return data.secret;
+}
+
+async function putOverlayBlob(slug, secret, config) {
+  const r = await fetch(overlayURL(slug), {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Authorization': 'Bearer ' + secret,
+    },
+    body: JSON.stringify(config),
+  });
+  if (r.status === 401) throw new Error('Edit secret rejected — this browser may not be the one that created the slug');
+  if (!r.ok) throw new Error('Put: ' + r.status);
+}
+
+async function getOverlayBlob(slug) {
+  const r = await fetch(overlayURL(slug) + '?t=' + Date.now(), {
+    cache: 'no-store',
+    headers: { 'Accept': 'application/json' },
+  });
+  if (r.status === 404) throw new Error('No streamer named "' + slug + '" on the relay');
+  if (!r.ok) throw new Error('Get: ' + r.status);
+  return r.json();
 }
 
 async function addNewStreamer() {
-  if (!ghToken) { showToast('Save a GitHub token first'); return; }
-  const name = (prompt('Streamer name (e.g. TheCheeseBall81):') || '').trim();
-  if (!name) return;
-  if (registry[name]) {
-    if (!confirm(`"${name}" exists. Overwrite their config?`)) return;
-  }
-  setStatus('Creating gist for ' + name + '...', '#ff0');
+  const raw = (prompt('Streamer slug (lowercase, letters/numbers/dash):') || '').trim();
+  if (!raw) return;
+  const slug = sanitizeSlug(raw);
+  if (!slug) { showToast('That slug has no usable characters'); return; }
+  if (registry[slug]) { showToast('"' + slug + '" is already in your list — select it in the dropdown or Forget first.'); return; }
+  setStatus('Creating ' + slug + ' on the relay...', '#ff0');
   try {
-    const config = getConfig();
-    const cr = await fetch('https://api.github.com/gists', {
-      method: 'POST', headers: ghHeaders(),
-      body: JSON.stringify({
-        description: '[overlay-v2] config for ' + name,
-        public: true,
-        files: { [GIST_FILENAME]: { content: JSON.stringify(config, null, 2) } },
-      }),
-    });
-    if (!cr.ok) throw new Error('Create gist: ' + cr.status);
-    const gist = await cr.json();
-    registry[name] = gist.id;
-    await saveRegistry();
-    activeStreamer = name;
+    const secret = await createOverlayBlob(slug, getConfig());
+    registry[slug] = { slug: slug, secret: secret };
+    activeStreamer = slug;
+    saveRegistryLocal();
     localStorage.setItem('overlay-active-streamer', activeStreamer);
     populateStreamerSelect();
-    setStatus(name + ' added! Click Copy Streamer URL.', '#0f0');
-    showToast('Streamer "' + name + '" added');
+    setStatus(slug + ' created — click Copy Streamer URL to save the operator link.', '#0f0');
+    showToast('Streamer "' + slug + '" created');
   } catch (e) {
-    setStatus('Failed: ' + e.message, '#f44');
+    setStatus('Create failed: ' + e.message, '#f44');
   }
+}
+
+async function pushStreamerUpdate() {
+  const entry = registry[activeStreamer];
+  if (!entry || !entry.slug) { showToast('Select or add a streamer first'); return; }
+  if (!entry.secret) {
+    showToast('No edit secret in this browser — Import the operator URL (with #s=…) once to enable pushes');
+    return;
+  }
+  setStatus('Pushing update for ' + activeStreamer + '...', '#ff0');
+  try {
+    await putOverlayBlob(entry.slug, entry.secret, getConfig());
+    setStatus('Pushed. Any browser on the Streamer URL will see it on reload.', '#0f0');
+    showToast('Update pushed for ' + activeStreamer);
+  } catch (e) {
+    setStatus('Push failed: ' + e.message, '#f44');
+  }
+}
+
+function removeCurrentStreamer() {
+  if (!activeStreamer) { showToast('No streamer selected'); return; }
+  if (!confirm('Forget "' + activeStreamer + '" from this browser? The slug stays on the relay — you can Import URL to bring it back.')) return;
+  delete registry[activeStreamer];
+  saveRegistryLocal();
+  activeStreamer = '';
+  localStorage.removeItem('overlay-active-streamer');
+  populateStreamerSelect();
+  setStatus('Removed from this browser.', '#0f0');
 }
 
 async function onStreamerSelect() {
   const sel = document.getElementById('streamer-select');
   const name = sel.value;
   if (!name) { activeStreamer = ''; return; }
-  if (!registry[name]) return;
+  const entry = registry[name];
+  if (!entry || !entry.slug) return;
   activeStreamer = name;
   localStorage.setItem('overlay-active-streamer', name);
-  cloudURL = `https://gist.githubusercontent.com/raw/${registry[name]}/${GIST_FILENAME}`;
-  document.getElementById('cloud-url').value = cloudURL;
+  cloudURL = overlayURL(entry.slug);
+  const urlEl = document.getElementById('cloud-url');
+  if (urlEl) urlEl.value = cloudURL;
   setStatus('Loading ' + name + "'s config...", '#ff0');
   try {
-    const r = await fetch('https://api.github.com/gists/' + registry[name], { headers: ghHeaders() });
-    if (!r.ok) throw new Error('Fetch: ' + r.status);
-    const data = await r.json();
-    const content = data.files[GIST_FILENAME]?.content;
-    if (!content) throw new Error('Empty gist');
-    const config = JSON.parse(content);
+    const config = await getOverlayBlob(entry.slug);
     applyConfig(config, 'load');
-    // Set chat channel from streamer name as default
     const chatEl = document.getElementById('chat-channel');
     if (chatEl && !chatEl.value) chatEl.value = name;
     setStatus('Loaded ' + name, '#0f0');
@@ -3033,61 +2955,48 @@ async function onStreamerSelect() {
   }
 }
 
-async function pushStreamerUpdate() {
-  if (!ghToken) { showToast('Save a GitHub token first'); return; }
-  if (!activeStreamer || !registry[activeStreamer]) {
-    showToast('Select or add a streamer first'); return;
-  }
-  setStatus('Pushing update for ' + activeStreamer + '...', '#ff0');
-  try {
-    const config = getConfig();
-    const r = await fetch('https://api.github.com/gists/' + registry[activeStreamer], {
-      method: 'PATCH', headers: ghHeaders(),
-      body: JSON.stringify({
-        files: { [GIST_FILENAME]: { content: JSON.stringify(config, null, 2) } },
-      }),
-    });
-    if (!r.ok) throw new Error('Status ' + r.status);
-    setStatus('Pushed! Streamer can !reload.', '#0f0');
-    showToast('Update pushed for ' + activeStreamer);
-  } catch (e) {
-    setStatus('Failed: ' + e.message, '#f44');
-  }
-}
-
-async function removeCurrentStreamer() {
-  if (!activeStreamer) { showToast('No streamer selected'); return; }
-  if (!confirm(`Remove "${activeStreamer}" from registry? (The gist itself stays on GitHub.)`)) return;
-  delete registry[activeStreamer];
-  try {
-    await saveRegistry();
-    activeStreamer = '';
-    localStorage.removeItem('overlay-active-streamer');
-    populateStreamerSelect();
-    setStatus('Removed', '#0f0');
-  } catch (e) {
-    setStatus('Failed: ' + e.message, '#f44');
-  }
-}
-
 function copyStreamerLink() {
-  // Prefer short ?gist=<id> form when we have an active streamer
+  const entry = registry[activeStreamer];
+  if (!entry || !entry.slug) { showToast('Select or add a streamer first'); return; }
   const params = new URLSearchParams();
-  if (activeStreamer && registry[activeStreamer]) {
-    params.set('gist', registry[activeStreamer]);
-  } else {
-    const url = cloudURL || (document.getElementById('cloud-url').value || '').trim();
-    if (!url) { showToast('Click Create Link first'); return; }
-    params.set('config', url);
-  }
+  params.set('overlay', entry.slug);
   const chat = (document.getElementById('chat-channel').value || '').trim();
   if (chat) params.set('chat', chat);
-  const streamerURL = window.location.origin + window.location.pathname + '?' + params.toString();
-  navigator.clipboard.writeText(streamerURL).then(() => {
-    showToast('Streamer URL copied!');
-  }).catch(() => {
-    prompt('Copy this URL:', streamerURL);
-  });
+  // Secret rides on the FRAGMENT (`#s=…`), which never leaves the browser —
+  // nginx and the relay logs never see it. Viewers get a URL without the
+  // fragment and stay read-only.
+  const base = window.location.origin + window.location.pathname + '?' + params.toString();
+  const operatorURL = entry.secret ? (base + '#s=' + encodeURIComponent(entry.secret)) : base;
+  navigator.clipboard.writeText(operatorURL).then(() => {
+    showToast(entry.secret ? 'Operator URL copied (keep it private — the # part grants editing)' : 'Streamer URL copied (read-only)');
+  }).catch(() => prompt('Copy this URL:', operatorURL));
+}
+
+function importStreamerFromURL() {
+  const raw = (prompt('Paste the Streamer URL (or just the slug):') || '').trim();
+  if (!raw) return;
+  let slug = raw;
+  let secret = '';
+  try {
+    if (raw.includes('://') || raw.startsWith('?') || raw.startsWith('#')) {
+      const asURL = raw.includes('://') ? raw : (window.location.origin + '/' + raw.replace(/^[?#]/, '?'));
+      const u = new URL(asURL);
+      slug = new URLSearchParams(u.search).get('overlay') || slug;
+      if (u.hash) {
+        const m = u.hash.match(/[?&#]?s=([^&]+)/);
+        if (m) secret = decodeURIComponent(m[1]);
+      }
+    }
+  } catch (e) { /* fall through with raw */ }
+  slug = sanitizeSlug(slug);
+  if (!slug) { showToast('Could not parse a slug'); return; }
+  const existing = registry[slug] || {};
+  registry[slug] = { slug: slug, secret: secret || existing.secret || '' };
+  activeStreamer = slug;
+  saveRegistryLocal();
+  localStorage.setItem('overlay-active-streamer', slug);
+  populateStreamerSelect();
+  onStreamerSelect();
 }
 
 function testCloudURL() {
@@ -4371,25 +4280,51 @@ function init() {
     presetContainer.appendChild(btn);
   });
 
-  loadGHToken();
+  loadRegistry();
 
-  // Check for ?gist=<id> (shorthand) or ?config=<url> — both override local
   const params = new URLSearchParams(window.location.search);
-  const gistParam = params.get('gist');
+  const overlayParam = params.get('overlay');
   const configParam = params.get('config');
-  // Loading rules:
-  // - Loading from a gist / cloud URL: the gist's presets are the source of
-  //   truth. Local presets are only a fallback for when the fetch fails
-  //   (offline, GitHub down) so the operator still sees SOMETHING.
-  // - Loading from localStorage only: that IS the source.
-  // This matches the "universal, not per-browser" ask — editing on one
-  // machine and refreshing on another should show the same presets.
-  if (gistParam) {
-    loadFromCloud(`https://gist.githubusercontent.com/raw/${gistParam}/${GIST_FILENAME}`, false)
+  const gistParam = params.get('gist');
+
+  // Secret rides on the fragment, never on the query string, so nginx logs
+  // and the Pages CDN never see it.
+  let urlSecret = '';
+  if (window.location.hash) {
+    const m = window.location.hash.match(/[?&#]?s=([^&]+)/);
+    if (m) urlSecret = decodeURIComponent(m[1]);
+  }
+
+  if (overlayParam) {
+    const slug = overlayParam.toLowerCase();
+    const entry = registry[slug] || { slug: slug, secret: '' };
+    if (urlSecret) entry.secret = urlSecret;
+    registry[slug] = entry;
+    activeStreamer = slug;
+    saveRegistryLocal();
+    localStorage.setItem('overlay-active-streamer', slug);
+    populateStreamerSelect();
+    // Scrub the fragment from the address bar immediately — the operator's
+    // bookmark stays intact in their clipboard, but the secret shouldn't
+    // sit in window.location.hash where a screenshot could catch it.
+    if (urlSecret && history.replaceState) {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+    loadFromCloud(overlayURL(slug), false)
       .then(() => renderPresetList(), () => { loadPresetsLocal(); renderPresetList(); });
   } else if (configParam) {
     loadFromCloud(configParam, false)
       .then(() => renderPresetList(), () => { loadPresetsLocal(); renderPresetList(); });
+  } else if (gistParam) {
+    // Legacy — public gist raw URLs still work for READING without a token.
+    // Writes won't go anywhere, so the operator should recreate as an
+    // overlay slug.
+    const legacyUrl = 'https://gist.githubusercontent.com/raw/' + gistParam + '/overlay-config.json';
+    loadFromCloud(legacyUrl, false)
+      .then(() => {
+        renderPresetList();
+        showToast('Legacy gist link — click + New Streamer to switch to the relay backend (updates auto-sync).');
+      }, () => { loadPresetsLocal(); renderPresetList(); });
   } else {
     loadConfig();
     loadPresetsLocal();
