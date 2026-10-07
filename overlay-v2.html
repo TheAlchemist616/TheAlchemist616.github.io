@@ -3814,37 +3814,63 @@ function applyConfigFromString(input, user) {
 // at page load — get built now, under the gesture, so the fresh iframe's
 // internal autoplay can use that activation too.
 function startAllStreams() {
+  // Diagnostic report so we can SEE why nothing played, when the obvious
+  // story (click = play) doesn't match reality. Shows in a persistent panel
+  // on screen rather than in a 2-second toast, so the operator can read it
+  // and relay what happened.
+  const report = [];
   const streams = panels.filter(p => p.type === 'stream' && p.channel);
+  report.push('panels total: ' + panels.length);
+  report.push('streams with channel: ' + streams.length);
+  report.push('userActivation.isActive: ' + (navigator.userActivation && navigator.userActivation.isActive));
+  report.push('userActivation.hasBeenActive: ' + (navigator.userActivation && navigator.userActivation.hasBeenActive));
+
   if (!streams.length) {
-    showToast('No streams loaded — type a channel into a slot first');
+    report.push('→ no streams to play');
+    showDebug(report.join('\n'));
     return;
   }
-  let played = 0;
+
+  let played = 0, missingPlayer = 0, missingEntry = 0, threw = 0;
   streams.forEach(p => {
     const entry = panelElements.get(p.id);
-    if (!entry) return;
+    if (!entry) { missingEntry++; return; }
     if (!entry.player) {
-      // No player yet — build one. Even if its autoplay still gets
-      // blocked, the parent page now has activation for later retries.
       initPanelPlayer(entry, p);
+      report.push(p.presetName + ' (' + p.channel + '): built fresh player');
       played++;
       return;
     }
-    // Kick the existing player under the gesture. play() flips the "user
-    // wants playback" bit, and because this call is still inside the click
-    // task, the browser propagates user activation across the postMessage
-    // to the Twitch iframe — which is exactly the gesture its own middle
-    // play button would carry. setChannel on the SAME channel used to be
-    // here as a stale-session shaker, but it reloads the HLS stream and
-    // the resulting iframe flicker landed in the "all it does is refresh"
-    // bucket of user complaints, so it's out.
+    const hasPlay = typeof entry.player.play === 'function';
+    const hasMuted = typeof entry.player.setMuted === 'function';
     try {
-      if (entry.player.setMuted) entry.player.setMuted(true);
-      if (entry.player.play) entry.player.play();
+      if (hasMuted) entry.player.setMuted(true);
+      if (hasPlay) entry.player.play();
+      report.push(p.presetName + ' (' + p.channel + '): setMuted=' + hasMuted + ' play=' + hasPlay);
       played++;
-    } catch (e) {}
+    } catch (e) {
+      threw++;
+      report.push(p.presetName + ' (' + p.channel + '): THREW ' + e.message);
+    }
   });
-  showToast('Started ' + played + ' stream' + (played === 1 ? '' : 's'));
+  report.push('→ played=' + played + ' missingEntry=' + missingEntry + ' missingPlayer=' + missingPlayer + ' threw=' + threw);
+  showDebug(report.join('\n'));
+}
+
+// On-screen debug panel so startAllStreams can report what it saw. Click to
+// dismiss. Lives outside the toast system because toasts fade in 2s and
+// clip multi-line text.
+function showDebug(text) {
+  let el = document.getElementById('debug-panel');
+  if (!el) {
+    el = document.createElement('pre');
+    el.id = 'debug-panel';
+    el.style.cssText = 'position:fixed; left:12px; bottom:12px; max-width:520px; max-height:40vh; overflow:auto; background:rgba(0,0,0,0.9); color:#9ff; border:1px solid #099; padding:10px; font:12px/1.4 monospace; z-index:99999; white-space:pre-wrap; cursor:pointer; border-radius:4px;';
+    el.title = 'Click to dismiss';
+    el.onclick = () => el.remove();
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
 }
 
 function playAllStreams() {
