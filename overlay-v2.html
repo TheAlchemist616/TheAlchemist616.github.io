@@ -526,6 +526,13 @@
   <h2>Overlay Editor</h2>
 
   <div class="sidebar-section">
+    <button class="btn btn-primary" style="width:100%; font-size:14px; padding:10px;" onclick="startAllStreams()">
+      &#x25B6;&nbsp; Start / Restart All Streams
+    </button>
+    <p style="font-size:11px; color:#888; margin:6px 0 0;">Browsers block iframe autoplay until the page has had a user click. Press this once at setup to kick every stream into play; after that <code>!play</code> from chat works too.</p>
+  </div>
+
+  <div class="sidebar-section">
     <h3>Zelda Layout</h3>
     <p style="font-size:11px; color:#888; margin:0 0 6px;">Preset layouts for the Zelda II frame image. Loads the matching background on top, sets up blank-channel stream panels in the big holes (slot1..slotN), and empty text panels in the banner strips (text1..textM — the 2-slot layout has 2, the 4-slot has 4, the 6-slot has none). Fill channels / text in afterwards, or push them in via chat with <code>!load &lt;preset&gt; slot1</code> or <code>!label text1 Alchemist</code>.</p>
     <div class="sidebar-row" style="gap:4px;">
@@ -853,7 +860,7 @@
       <b style="color:#00d4ff;">Broadcaster + mods only:</b><br>
       <code>!audio &lt;channel&gt;</code> — switch audio<br>
       <code>!mute</code> — mute all streams<br>
-      <code>!play [slot&lt;N&gt;|channel]</code> — restart streams (rebuilds the iframe to defeat autoplay blocks)<br>
+      <code>!play [slot&lt;N&gt;|channel]</code> — restart streams. First time only, click <b>Start / Restart All Streams</b> at the top of the sidebar to grant autoplay — chat <code>!play</code> works for the rest of the session after that.<br>
       <code>!sync</code> — reload all streams<br>
       <code>!layout &lt;cols&gt;x&lt;rows&gt;</code> — e.g. 3x2<br>
       <code>!add &lt;channel&gt;</code> — add stream<br>
@@ -3788,6 +3795,31 @@ function applyConfigFromString(input, user) {
   } catch (e) {
     showToast(`[${user}] Invalid config`);
   }
+}
+
+// Sidebar "Start / Restart All Streams" button. Must be called from a real
+// click handler — that user gesture is what establishes session-wide user
+// activation. After the first click here, chat !play works for the rest of
+// the session (same tab) because the page has activation. Rebuilds every
+// stream iframe AND calls .play() on each, so the operator doesn't have to
+// care whether the stream was stuck on a blocked-autoplay thumbnail or just
+// paused.
+function startAllStreams() {
+  const streams = panels.filter(p => p.type === 'stream' && p.channel);
+  if (!streams.length) {
+    showToast('No streams loaded — type a channel into a slot first');
+    return;
+  }
+  streams.forEach(p => {
+    rebuildPlayer(p);
+    const entry = panelElements.get(p.id);
+    // play() may fire before the rebuilt player is READY; the try/catch
+    // guards that, and the new iframe's own autoplay will cover the race.
+    if (entry && entry.player && entry.player.play) {
+      try { entry.player.play(); } catch (e) {}
+    }
+  });
+  showToast('Started ' + streams.length + ' stream' + (streams.length === 1 ? '' : 's'));
 }
 
 function playAllStreams() {
