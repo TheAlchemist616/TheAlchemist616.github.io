@@ -2826,7 +2826,16 @@ async function initRegistry() {
     syncActiveStreamerFromURL();
     setStatus('Registry loaded (' + Object.keys(registry).length + ' streamers)', '#0f0');
   } catch (e) {
-    setStatus('Registry error: ' + e.message, '#f44');
+    // 401 from GitHub's API means the saved token is invalid, expired, or
+    // missing the gist scope — the most common failure for this feature,
+    // and the raw status code was leaving operators to guess the fix.
+    if (/\b401\b/.test(e.message)) {
+      setStatus('GitHub token invalid or expired — click Reset Token, generate a new one with the gist scope, and paste it in.', '#f44');
+    } else if (/\b403\b/.test(e.message)) {
+      setStatus('GitHub rate-limited (403). Wait a minute and press Refresh List, or Reset Token if this keeps happening.', '#f44');
+    } else {
+      setStatus('Registry error: ' + e.message, '#f44');
+    }
   }
 }
 
