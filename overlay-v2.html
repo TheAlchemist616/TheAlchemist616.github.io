@@ -3798,28 +3798,48 @@ function applyConfigFromString(input, user) {
 }
 
 // Sidebar "Start / Restart All Streams" button. Must be called from a real
-// click handler — that user gesture is what establishes session-wide user
-// activation. After the first click here, chat !play works for the rest of
-// the session (same tab) because the page has activation. Rebuilds every
-// stream iframe AND calls .play() on each, so the operator doesn't have to
-// care whether the stream was stuck on a blocked-autoplay thumbnail or just
-// paused.
+// click handler — the browser's autoplay policy only honours .play() when
+// the current task is a user-gesture task. We call setChannel + play
+// SYNCHRONOUSLY on every ready player so the gesture is still active when
+// each call reaches the SDK; replacing the whole iframe (as earlier
+// attempts did) burns the gesture window on DOM work before the new iframe
+// is even READY.
+//
+// Panels whose player was never built — because their channel was empty
+// at page load — get built now, under the gesture, so the fresh iframe's
+// internal autoplay can use that activation too.
 function startAllStreams() {
   const streams = panels.filter(p => p.type === 'stream' && p.channel);
   if (!streams.length) {
     showToast('No streams loaded — type a channel into a slot first');
     return;
   }
+  let played = 0;
   streams.forEach(p => {
-    rebuildPlayer(p);
     const entry = panelElements.get(p.id);
-    // play() may fire before the rebuilt player is READY; the try/catch
-    // guards that, and the new iframe's own autoplay will cover the race.
-    if (entry && entry.player && entry.player.play) {
-      try { entry.player.play(); } catch (e) {}
+    if (!entry) return;
+    if (!entry.player) {
+      // No player yet — build one. Even if its autoplay still gets
+      // blocked, the parent page now has activation for later retries.
+      initPanelPlayer(entry, p);
+      played++;
+      return;
     }
+    // Kick the existing player under the gesture. play() flips the "user
+    // wants playback" bit, and because this call is still inside the click
+    // task, the browser propagates user activation across the postMessage
+    // to the Twitch iframe — which is exactly the gesture its own middle
+    // play button would carry. setChannel on the SAME channel used to be
+    // here as a stale-session shaker, but it reloads the HLS stream and
+    // the resulting iframe flicker landed in the "all it does is refresh"
+    // bucket of user complaints, so it's out.
+    try {
+      if (entry.player.setMuted) entry.player.setMuted(true);
+      if (entry.player.play) entry.player.play();
+      played++;
+    } catch (e) {}
   });
-  showToast('Started ' + streams.length + ' stream' + (streams.length === 1 ? '' : 's'));
+  showToast('Started ' + played + ' stream' + (played === 1 ? '' : 's'));
 }
 
 function playAllStreams() {
