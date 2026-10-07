@@ -3332,23 +3332,24 @@ function handleCommand(user, msg) {
       break;
     }
     case 'play': {
-      // !play             — rebuild every stream (fresh autoplay evaluation)
-      // !play slot1       — rebuild just that slot
-      // !play cheeseball  — rebuild the slot showing that channel
-      // A plain .play() call from chat is blocked by the browser's autoplay
-      // policy (no user gesture on a WebSocket message), so a stream stuck
-      // on its thumbnail stays stuck. Replacing the iframe triggers a fresh
-      // autoplay attempt — muted autoplay is universally allowed, so the
-      // new iframe starts rolling where .play() couldn't.
+      // !play             — try to play every stream
+      // !play slot1       — try to play just that slot
+      // !play cheeseball  — try to play the slot showing that channel
+      //
+      // Chat is NOT a user gesture, so .play() will succeed only when the
+      // page has already been activated (the operator has clicked the big
+      // "Start / Restart All Streams" button at least once this session).
+      // Earlier versions of this command rebuilt the iframe, hoping a fresh
+      // autoplay would unstick things — in practice that just refreshed
+      // without ever playing, because the browser still had no gesture to
+      // honour. We now just forward to the shared helper that calls
+      // play()/setMuted() on the existing players; one path, one bug
+      // surface, and chat works for the rest of the session the moment the
+      // operator presses the button.
       const target = (args[0] || '').trim();
       if (!target) {
-        const streams = panels.filter(p => p.type === 'stream' && p.channel);
-        if (!streams.length) {
-          showToast(`[${user}] No streams loaded — type a channel into a slot first`);
-          break;
-        }
-        streams.forEach(p => rebuildPlayer(p));
-        showToast(`[${user}] Restarted ${streams.length} stream${streams.length === 1 ? '' : 's'}`);
+        startAllStreams();
+        showToast(`[${user}] !play — if nothing started, press the Start Streams button once`);
         break;
       }
       let panel = null;
@@ -3356,12 +3357,10 @@ function handleCommand(user, msg) {
         const id = (/^text/i.test(target) ? 'text' : 'slot') + target.match(/\d+/)[0];
         panel = panels.find(p => p.presetName === id);
       } else if (/^\d+$/.test(target)) {
-        // Bare number: streams-first ordering, matching the sidebar "Streams 1..N" list
         const n = parseInt(target, 10);
         const streams = panels.filter(p => p.type === 'stream');
         panel = streams[n - 1] || panels[n - 1];
       } else {
-        // Treat it as a channel name
         const ch = target.toLowerCase().replace(/^@/, '');
         panel = panels.find(p => (p.channel || '').toLowerCase() === ch);
       }
@@ -3377,8 +3376,14 @@ function handleCommand(user, msg) {
         showToast(`[${user}] ${target} has no channel yet`);
         break;
       }
-      rebuildPlayer(panel);
-      showToast(`[${user}] Restarted ${panel.channel}`);
+      const entry = panelElements.get(panel.id);
+      if (entry && entry.player) {
+        try {
+          if (entry.player.setMuted) entry.player.setMuted(true);
+          if (entry.player.play) entry.player.play();
+        } catch (e) {}
+      }
+      showToast(`[${user}] Played ${panel.channel} — press Start Streams if it stays frozen`);
       break;
     }
     case 'sync': {
