@@ -668,7 +668,7 @@
 
   <div class="sidebar-section">
     <h3>Panel Presets</h3>
-    <p style="font-size:11px; color:#888; margin:0 0 6px;">A preset snapshots one panel (channel, position, size, zoom/pan, style, layer). Loading it recreates that exact panel; loading one that already exists updates it in place. Load from chat with <code>!load &lt;name&gt;</code>.</p>
+    <p style="font-size:11px; color:#888; margin:0 0 6px;">A preset snapshots one panel's channel, crop, style and layer. Loading drops it into a slot of your choosing and replaces whatever was there. Pick a target slot on the row, then Load. From chat: <code>!load &lt;name&gt; slot1</code>.</p>
     <div class="sidebar-row" style="gap:4px;">
       <input type="text" id="preset-name" placeholder="preset name" style="flex:1;">
       <button class="btn btn-sm btn-primary" onclick="savePresetFromSelected()" title="Save the selected panel as a preset (needs a selected panel)">Save selected</button>
@@ -871,7 +871,7 @@
       <code>!config &lt;url/hash&gt;</code> — load full config<br>
       <code>!reload</code> — pull latest config from cloud<br>
       <code>!sync</code> — re-sync all stream players<br>
-      <code>!load &lt;preset&gt; [slot&lt;N&gt;|text&lt;N&gt;]</code> — drop a preset; the slot/text name positions it<br>
+      <code>!load &lt;preset&gt; &lt;slot&lt;N&gt;|text&lt;N&gt;&gt;</code> — drop a preset into a slot, replacing whatever is there<br>
       <code>!presets</code> — list saved preset names<br>
       <code>!layer &lt;n|next|prev&gt;</code> — bring a numbered layer forward<br>
       <code>!zelda &lt;2|4|6&gt;</code> — apply a Zelda frame layout (streams slot1..slotN plus text1..textM for the banner strips)</code>
@@ -1356,23 +1356,67 @@ function renderPresetList() {
     host.appendChild(empty);
     return;
   }
+
+  // Build a type-filtered list of slot targets the user can pick from. Loading
+  // a stream preset into text1 would be nonsense, so text presets see text
+  // slots and streams see stream slots. If no Zelda layout is active we
+  // disable Load — there is nowhere named to put it.
+  const layout = currentZeldaLayout ? ZELDA_LAYOUTS[currentZeldaLayout] : null;
+  const streamSlotNames = layout ? layout.streams.map((_, i) => 'slot' + (i + 1)) : [];
+  const textSlotNames = layout ? layout.texts.map((_, i) => 'text' + (i + 1)) : [];
+
   streamPresets.forEach(preset => {
     const row = document.createElement('div');
-    row.className = 'sidebar-row';
-    row.style.gap = '4px';
+    row.style.cssText = 'display:flex; align-items:center; gap:4px; margin-bottom:4px; flex-wrap:wrap;';
 
     const label = document.createElement('span');
-    label.style.cssText = 'flex:1; font-size:12px; color:#ddd; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+    label.style.cssText = 'flex:1 1 100%; font-size:12px; color:#ddd; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
     const whatIsIt = preset.type === 'url' ? 'URL'
       : preset.type === 'text' ? 'text'
       : (preset.channel || '?');
     label.textContent = preset.name + ' — ' + whatIsIt;
     label.title = preset.name + ' (' + preset.w + '×' + preset.h + ' @ ' + preset.x + ',' + preset.y + ')';
 
+    const slotPick = document.createElement('select');
+    slotPick.style.cssText = 'flex:1; font-size:11px;';
+    const targets = preset.type === 'text' ? textSlotNames : streamSlotNames;
+    if (!targets.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = currentZeldaLayout
+        ? 'no ' + (preset.type === 'text' ? 'text' : 'stream') + ' slots in this layout'
+        : 'apply a Zelda layout first';
+      slotPick.appendChild(opt);
+      slotPick.disabled = true;
+    } else {
+      targets.forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        slotPick.appendChild(opt);
+      });
+    }
+
     const load = document.createElement('button');
     load.className = 'btn btn-sm btn-primary';
     load.textContent = 'Load';
-    load.onclick = () => loadPresetByName(preset.name, null);
+    load.disabled = !targets.length;
+    load.title = 'Drop this preset into the chosen slot (any existing content there is replaced).';
+    load.onclick = () => {
+      const slot = slotPick.value;
+      if (!slot) return;
+      // The slot is the identity, so loading into an occupied slot swaps the
+      // channel/text in place without piling up a second panel. If the user
+      // picked a slot that already shows a different stream, confirm before
+      // overwriting — the question we had to settle for the chat command, but
+      // in the sidebar we can actually ask.
+      const existing = panels.find(x => x.presetName === slotIdentity(slot));
+      const existingContent = existing && (existing.type === 'text' ? existing.text : existing.channel);
+      if (existingContent && existingContent !== preset.channel && existingContent !== preset.text) {
+        if (!confirm('Replace ' + slot + ' ("' + existingContent + '") with "' + preset.name + '"?')) return;
+      }
+      loadPresetByName(preset.name, null, slot);
+    };
 
     const del = document.createElement('button');
     del.className = 'btn btn-sm btn-danger';
@@ -1384,6 +1428,7 @@ function renderPresetList() {
     };
 
     row.appendChild(label);
+    row.appendChild(slotPick);
     row.appendChild(load);
     row.appendChild(del);
     host.appendChild(row);
@@ -3574,7 +3619,15 @@ function handleCommand(user, msg) {
       }
       const name = rest.join(' ').trim();
       if (!name) {
-        showToast(`[${user}] Usage: !load <preset> [slot<N>]`);
+        showToast(`[${user}] Usage: !load <preset> slot<N>`);
+        break;
+      }
+      // Chat has to be explicit about WHERE — a bare !load used to create a
+      // new panel at the preset's saved position, which stacked on top of
+      // whatever stream was already in that spot. Requiring the slot makes
+      // every load a deliberate overwrite of that slot, with no surprises.
+      if (!slotName) {
+        showToast(`[${user}] Say which slot: !load ${name} slot1 (or text1)`);
         break;
       }
       loadPresetByName(name, user, slotName);
