@@ -853,6 +853,7 @@
       <b style="color:#00d4ff;">Broadcaster + mods only:</b><br>
       <code>!audio &lt;channel&gt;</code> — switch audio<br>
       <code>!mute</code> — mute all streams<br>
+      <code>!play [slot&lt;N&gt;|channel]</code> — press Play (every stream, or one slot/channel)<br>
       <code>!sync</code> — reload all streams<br>
       <code>!layout &lt;cols&gt;x&lt;rows&gt;</code> — e.g. 3x2<br>
       <code>!add &lt;channel&gt;</code> — add stream<br>
@@ -3303,8 +3304,44 @@ function handleCommand(user, msg) {
       break;
     }
     case 'play': {
-      playAllStreams();
-      showToast(`[${user}] Played all streams`);
+      // !play             — play every stream (today's behaviour)
+      // !play slot1       — play just that slot
+      // !play cheeseball  — play the slot showing that channel
+      const target = (args[0] || '').trim();
+      if (!target) {
+        playAllStreams();
+        showToast(`[${user}] Played all streams`);
+        break;
+      }
+      let panel = null;
+      if (/^(slot|text)\d+$/i.test(target)) {
+        const id = (/^text/i.test(target) ? 'text' : 'slot') + target.match(/\d+/)[0];
+        panel = panels.find(p => p.presetName === id);
+      } else if (/^\d+$/.test(target)) {
+        // Bare number: streams-first ordering, matching the sidebar "Streams 1..N" list
+        const n = parseInt(target, 10);
+        const streams = panels.filter(p => p.type === 'stream');
+        panel = streams[n - 1] || panels[n - 1];
+      } else {
+        // Treat it as a channel name
+        const ch = target.toLowerCase().replace(/^@/, '');
+        panel = panels.find(p => (p.channel || '').toLowerCase() === ch);
+      }
+      if (!panel) {
+        showToast(`[${user}] No stream at ${target}`);
+        break;
+      }
+      if (panel.type !== 'stream') {
+        showToast(`[${user}] ${target} isn't a stream slot`);
+        break;
+      }
+      const entry = panelElements.get(panel.id);
+      if (entry && entry.player && entry.player.play) {
+        try { entry.player.play(); } catch (e) {}
+        showToast(`[${user}] Played ${panel.channel || target}`);
+      } else {
+        showToast(`[${user}] ${target} has no player yet`);
+      }
       break;
     }
     case 'sync': {
