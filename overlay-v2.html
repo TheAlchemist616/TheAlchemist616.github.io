@@ -1446,41 +1446,57 @@ function syncCanvasDOM() {
       if (target) target.appendChild(iframe);
       entry.urlIframe = iframe;
     } else {
-      // Stream panel — Twitch Player
-      try {
-        const player = new Twitch.Player('tp-' + panel.id, {
-          channel: panel.channel,
-          parent: [PARENT],
-          muted: true,
-          autoplay: true,
-          width: panel.w,
-          height: panel.h,
-        });
-        entry.player = player;
-        // When the player finishes initializing, apply the saved audio state —
-        // unmute this one if it matches the active audio panel, mute otherwise.
-        player.addEventListener(Twitch.Player.READY, () => {
-          const shouldUnmute = (panel.id === audioActiveId);
-          try {
-            player.setMuted(!shouldUnmute);
-            if (shouldUnmute) player.setVolume(1.0);
-          } catch (e) {}
-          if (entry.audioBtn) {
-            entry.audioBtn.classList.toggle('active', shouldUnmute);
-            entry.audioBtn.innerHTML = shouldUnmute ? '&#x1f50a;' : '&#x1f507;';
-            entry.audioBtn.title = shouldUnmute ? 'Click to mute' : 'Click to unmute this stream';
-          }
-        });
-      } catch (e) {
-        const target = document.getElementById('tp-' + panel.id);
-        if (target) {
-          target.style.width = panel.w + 'px';
-          target.style.height = panel.h + 'px';
-          target.style.background = '#1a1a2e';
-        }
-      }
+      // Stream panel — only build the Twitch.Player if we actually have a
+      // channel to point it at. An empty-string channel makes the Twitch
+      // player constructor fail silently (no error, no iframe), which left
+      // Zelda-layout slots unable to load a stream when the operator typed
+      // a channel in afterwards. We defer creation until initPanelPlayer
+      // is called on the channel-switch path below.
+      initPanelPlayer(entry, panel);
     }
   });
+}
+
+// Instantiate (or re-instantiate) the Twitch.Player for a stream panel, if
+// its channel is non-empty. Called from syncCanvasDOM when the panel first
+// appears AND from updateAllPanelDOM when a blank channel first gets a value.
+function initPanelPlayer(entry, panel) {
+  if (!panel.channel) return; // nothing to load yet; try again when a channel is set
+  const target = document.getElementById('tp-' + panel.id);
+  if (!target) return;
+  // If we already have a working player, nothing to do here — channel swaps
+  // are handled through setChannel on the API, not a full rebuild.
+  if (entry.player && typeof entry.player.setChannel === 'function') return;
+  // Clear any leftover placeholder styling from a prior empty state.
+  target.style.background = '';
+  try {
+    const player = new Twitch.Player('tp-' + panel.id, {
+      channel: panel.channel,
+      parent: [PARENT],
+      muted: true,
+      autoplay: true,
+      width: panel.w,
+      height: panel.h,
+    });
+    entry.player = player;
+    entry.channelLoaded = panel.channel;
+    player.addEventListener(Twitch.Player.READY, () => {
+      const shouldUnmute = (panel.id === audioActiveId);
+      try {
+        player.setMuted(!shouldUnmute);
+        if (shouldUnmute) player.setVolume(1.0);
+      } catch (e) {}
+      if (entry.audioBtn) {
+        entry.audioBtn.classList.toggle('active', shouldUnmute);
+        entry.audioBtn.innerHTML = shouldUnmute ? '&#x1f50a;' : '&#x1f507;';
+        entry.audioBtn.title = shouldUnmute ? 'Click to mute' : 'Click to unmute this stream';
+      }
+    });
+  } catch (e) {
+    target.style.width = panel.w + 'px';
+    target.style.height = panel.h + 'px';
+    target.style.background = '#1a1a2e';
+  }
 }
 
 function createPanelElement(p) {
@@ -1615,12 +1631,17 @@ function updateAllPanelDOM() {
       }
     }
 
-    // Switch channel via API (no reload)
-    if (entry.channelLoaded !== p.channel && p.type !== 'url') {
-      if (entry.player && entry.player.setChannel) {
-        entry.player.setChannel(p.channel);
+    // Switch channel via API (no reload). If the panel started life with
+    // an empty channel the player was never built, so a channel appearing
+    // now has to build it from scratch instead of calling setChannel on a
+    // nonexistent object.
+    if (entry.channelLoaded !== p.channel && p.type === 'stream') {
+      if (!entry.player) {
+        initPanelPlayer(entry, p);
+      } else if (entry.player.setChannel) {
+        if (p.channel) entry.player.setChannel(p.channel);
+        entry.channelLoaded = p.channel;
       }
-      entry.channelLoaded = p.channel;
     }
 
     // Hide audio button on URL and text panels
