@@ -545,6 +545,17 @@
   </div>
 
   <div class="sidebar-section">
+    <h3>Zelda Layout</h3>
+    <p style="font-size:11px; color:#888; margin:0 0 6px;">Preset layouts for the Zelda II frame image. Loads the matching background on top and sets up blank-channel panels in each hole. Fill the channels in afterwards, or push streams in via chat with <code>!load &lt;preset&gt; slot&lt;N&gt;</code>.</p>
+    <div class="sidebar-row" style="gap:4px;">
+      <button class="btn btn-sm" onclick="applyZeldaLayout(2)">2 slots</button>
+      <button class="btn btn-sm" onclick="applyZeldaLayout(4)">4 slots</button>
+      <button class="btn btn-sm" onclick="applyZeldaLayout(6)">6 slots</button>
+    </div>
+    <div id="zelda-active-note" style="font-size:11px; color:#888; margin-top:4px;">No Zelda layout active.</div>
+  </div>
+
+  <div class="sidebar-section">
     <h3>Presets</h3>
     <div class="preset-grid" id="preset-buttons"></div>
     <button class="btn btn-primary" style="width:100%; margin-top:6px;" onclick="addPanel()">+ Add Stream</button>
@@ -624,9 +635,10 @@
       <code>!config &lt;url/hash&gt;</code> — load full config<br>
       <code>!reload</code> — pull latest config from cloud<br>
       <code>!sync</code> — re-sync all stream players<br>
-      <code>!load &lt;preset&gt;</code> — drop a saved panel preset into the layout<br>
+      <code>!load &lt;preset&gt; [slot&lt;N&gt;]</code> — drop a preset; with slot<N> it uses that Zelda slot's position<br>
       <code>!presets</code> — list saved preset names<br>
-      <code>!layer &lt;n|next|prev&gt;</code> — bring a numbered layer forward</code>
+      <code>!layer &lt;n|next|prev&gt;</code> — bring a numbered layer forward<br>
+      <code>!zelda &lt;2|4|6&gt;</code> — apply a Zelda frame layout with that many slots</code>
     </div>
   </div>
 
@@ -971,6 +983,101 @@ function applyPreset(cols, rows) {
 const panelElements = new Map(); // id -> { el, iframe, channelLoaded }
 
 // ============================================================
+// ZELDA LAYOUT PRESETS
+//
+// Named slot rectangles for each Zelda background (2, 4, 6). The numbers
+// came from scanning the actual PNGs' hole bounding boxes (see the
+// scratchpad find_slots.py). Streams fill the slot rectangles and the
+// corresponding Zelda frame is loaded on top so the frame's decoration
+// (brick ledges, inner rails, red-square corners) hides any overflow.
+// Slots are only slightly off a perfect 16:9 — Twitch's own player
+// letterboxes internally. If a stream needs to fill edge-to-edge, the
+// operator can zoom from the inspector or !zoom from chat afterwards.
+// ============================================================
+const ZELDA_FRAME_URL = n => 'https://thealchemist616.github.io/' + n + 'Zelda.png';
+const ZELDA_LAYOUTS = {
+  2: [
+    { x:   45, y:  52, w: 865, h: 730 },
+    { x: 1009, y:  52, w: 865, h: 730 },
+  ],
+  4: [
+    { x:   45, y:  42, w: 545, h: 455 },
+    { x: 1330, y:  42, w: 545, h: 455 },
+    { x:   45, y: 585, w: 545, h: 455 },
+    { x: 1330, y: 585, w: 545, h: 455 },
+  ],
+  6: [
+    { x:   45, y:  42, w: 545, h: 455 },
+    { x:  687, y:  42, w: 545, h: 455 },
+    { x: 1330, y:  42, w: 545, h: 455 },
+    { x:   45, y: 585, w: 545, h: 455 },
+    { x:  687, y: 585, w: 545, h: 455 },
+    { x: 1330, y: 585, w: 545, h: 455 },
+  ],
+};
+
+// Which Zelda layout is applied (null = none). Used so !load <preset> <slotN>
+// knows which slot rectangle to drop a preset into.
+let currentZeldaLayout = null;
+
+function slotRect(name) {
+  // Accept "slot1" / "Slot1" / "SLOT1" / bare "1". Returns null if we have no
+  // layout active or the slot number is out of range.
+  if (!currentZeldaLayout) return null;
+  const m = String(name || '').match(/(\d+)/);
+  if (!m) return null;
+  const idx = parseInt(m[1], 10) - 1;
+  const rects = ZELDA_LAYOUTS[currentZeldaLayout];
+  if (!rects || idx < 0 || idx >= rects.length) return null;
+  return rects[idx];
+}
+
+function applyZeldaLayout(n, user) {
+  const rects = ZELDA_LAYOUTS[n];
+  if (!rects) {
+    showToast((user ? '[' + user + '] ' : '') + 'Zelda layout must be 2, 4 or 6');
+    return;
+  }
+  // Load the matching background and float it ABOVE the streams. The user
+  // explicitly asked for the frame to be loaded over everything, so the
+  // slot rects can be slightly loose at the corners without looking off.
+  loadFrameFromURL(ZELDA_FRAME_URL(n));
+  setFrameLayer('front');
+
+  // Replace existing panels with one blank-channel panel per slot. Bind each
+  // one to presetName "slot<i>" so !load <preset> slot<i> can swap channels
+  // into a slot without duplicating panels.
+  panels = rects.map((r, i) => ({
+    id: 'p' + Date.now() + '_' + i,
+    type: 'stream',
+    channel: '',
+    url: '', text: '',
+    textFont: "'Arial Black', sans-serif",
+    textSize: 36, textColor: '#ffffff',
+    textBg: '#000000', textBgTransparent: false, textAlign: 'center',
+    x: r.x, y: r.y, w: r.w, h: r.h,
+    zoom: 1, panX: 0, panY: 0,
+    layer: null, layerNum: 1,
+    presetName: 'slot' + (i + 1),
+  }));
+  selectedId = null;
+  cropModeId = null;
+  currentZeldaLayout = n;
+  updateZeldaNote();
+  renderAll();
+  saveConfig();
+  showToast((user ? '[' + user + '] ' : '') + 'Zelda ' + n + '-slot layout applied');
+}
+
+function updateZeldaNote() {
+  const note = document.getElementById('zelda-active-note');
+  if (!note) return;
+  note.textContent = currentZeldaLayout
+    ? 'Active: ' + currentZeldaLayout + '-slot (' + ZELDA_LAYOUTS[currentZeldaLayout].length + ' slots named slot1..slot' + ZELDA_LAYOUTS[currentZeldaLayout].length + ')'
+    : 'No Zelda layout active.';
+}
+
+// ============================================================
 // NUMBERED PANEL LAYERS
 // ============================================================
 function getActiveLayer() { return activeLayer; }
@@ -1077,27 +1184,40 @@ function savePresetFromSelected() {
   showToast('Saved preset "' + name + '"');
 }
 
-function loadPresetByName(name, user) {
+function loadPresetByName(name, user, slotName) {
   const preset = streamPresets.find(x => x.name === name);
   if (!preset) {
     showToast((user ? '[' + user + '] ' : '') + 'No preset "' + name + '"');
     return false;
   }
-  // Find the panel already bound to this preset (if any) and overwrite it in
-  // place. applyFields rebuilds every field the preset covers; others stay.
-  let p = panels.find(x => x.presetName === name);
+  // Two identity rules:
+  //  - No slot: the preset IS the panel. Loading the same preset twice
+  //    updates the panel bound to that preset name in place.
+  //  - With slot: the SLOT is the panel. The preset supplies channel + style
+  //    + crop, the slot supplies position. Loading a different preset into
+  //    the same slot swaps who's shown there without a position change.
+  const rect = slotName ? slotRect(slotName) : null;
+  if (slotName && !rect) {
+    showToast((user ? '[' + user + '] ' : '') + 'No slot "' + slotName + '" in the active layout');
+    return false;
+  }
+  const identity = slotName ? ('slot' + String(slotName).match(/\d+/)[0]) : name;
+  let p = panels.find(x => x.presetName === identity);
   if (!p) {
     p = {
       id: (preset.type === 'url' ? 'u' : preset.type === 'text' ? 't' : 'p')
         + Date.now() + '_' + Math.floor(Math.random() * 1000),
-      presetName: name,
+      presetName: identity,
     };
     panels.push(p);
   }
   PRESET_FIELDS.forEach(k => {
     if (preset[k] !== undefined) p[k] = preset[k];
   });
-  // Fill in defaults in case the preset was saved before some field existed.
+  // Slot override wins over whatever position the preset carries.
+  if (rect) {
+    p.x = rect.x; p.y = rect.y; p.w = rect.w; p.h = rect.h;
+  }
   if (!p.type) p.type = 'stream';
   if (p.zoom === undefined) p.zoom = 1;
   if (p.panX === undefined) p.panX = 0;
@@ -1105,7 +1225,8 @@ function loadPresetByName(name, user) {
   if (p.layerNum === undefined) p.layerNum = 1;
   renderAll();
   saveConfig();
-  showToast((user ? '[' + user + '] ' : '') + 'Loaded preset "' + name + '"');
+  const where = slotName ? ' into ' + identity : '';
+  showToast((user ? '[' + user + '] ' : '') + 'Loaded preset "' + name + '"' + where);
   return true;
 }
 
@@ -2059,6 +2180,7 @@ function getConfig() {
     })),
     activeLayer: activeLayer,
     streamPresets: streamPresets.slice(),
+    zeldaLayout: currentZeldaLayout,
     timer: {
       room: raceTimerState.room || '',
       x: Math.round(raceTimerState.x),
@@ -2202,6 +2324,10 @@ function loadConfig() {
   // effect that reaches off this page.
   if (Array.isArray(config.streamPresets)) streamPresets = config.streamPresets.slice();
   if (typeof config.activeLayer === 'number') activeLayer = config.activeLayer;
+  if (typeof config.zeldaLayout === 'number' && ZELDA_LAYOUTS[config.zeldaLayout]) {
+    currentZeldaLayout = config.zeldaLayout;
+    updateZeldaNote();
+  }
 
   // Restore timer 2 if saved
   if (config.timer2) {
@@ -3212,14 +3338,16 @@ function handleCommand(user, msg) {
     }
     case 'load':
     case 'preset': {
-      // !load <name>              — drop preset <name> into the layout
-      // !preset load <name>       — same thing, long form
-      // !preset list              — toast the saved names
-      // !preset delete <name>     — forget a preset
+      // !load <name>               — drop preset <name> at its saved position
+      // !load <name> slot<N>       — drop preset into slot N of the active
+      //                              Zelda layout (position overridden)
+      // !preset load <name> [slot] — same as !load, long form
+      // !preset list               — toast the saved names
+      // !preset delete <name>      — forget a preset
       const sub = (args[0] || '').toLowerCase();
-      let name;
+      let rest;
       if (cmd === 'preset' && (sub === 'load' || sub === 'use')) {
-        name = args.slice(1).join(' ').trim();
+        rest = args.slice(1);
       } else if (cmd === 'preset' && (sub === 'list' || sub === 'ls')) {
         if (!streamPresets.length) {
           showToast(`[${user}] No presets saved`);
@@ -3238,14 +3366,31 @@ function handleCommand(user, msg) {
         }
         break;
       } else {
-        // Bare !load <name> OR !preset <name> (no sub-verb).
-        name = args.join(' ').trim();
+        rest = args;
       }
+      // Split out a trailing slot argument. A slot looks like "slot3" or
+      // just "3" — anything else is treated as part of the preset name so
+      // multi-word preset names still work.
+      let slotName = null;
+      if (rest.length >= 2) {
+        const tail = rest[rest.length - 1];
+        if (/^slot\d+$/i.test(tail)) {
+          slotName = tail;
+          rest = rest.slice(0, -1);
+        }
+      }
+      const name = rest.join(' ').trim();
       if (!name) {
-        showToast(`[${user}] Usage: !load <preset>`);
+        showToast(`[${user}] Usage: !load <preset> [slot<N>]`);
         break;
       }
-      loadPresetByName(name, user);
+      loadPresetByName(name, user, slotName);
+      break;
+    }
+    case 'zelda':
+    case 'zeldalayout': {
+      const n = parseInt(args[0], 10);
+      applyZeldaLayout(n, user);
       break;
     }
     case 'presets': {
@@ -3465,6 +3610,10 @@ function applyConfig(config, user) {
   // operator's existing presets alone rather than wiping them.
   if (Array.isArray(config.streamPresets)) streamPresets = config.streamPresets.slice();
   if (typeof config.activeLayer === 'number') activeLayer = config.activeLayer;
+  if (typeof config.zeldaLayout === 'number' && ZELDA_LAYOUTS[config.zeldaLayout]) {
+    currentZeldaLayout = config.zeldaLayout;
+    updateZeldaNote();
+  }
 
   renderAll();
   saveConfig();
