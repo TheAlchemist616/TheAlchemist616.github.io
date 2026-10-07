@@ -1161,6 +1161,88 @@ function applyLayerBackground(n) {
   }
 }
 
+// Per-layer race timers: each layer stores its own room / position / style
+// for BOTH timers. Switching layers tears the current timers down (so a
+// stale 1-second tick doesn't bleed between scenes), then rebuilds whichever
+// timers the incoming layer had running.
+let layerTimers = {}; // { layerNum: { timer1: snap, timer2: snap } }
+
+function timerSpecs() {
+  // Lazy — the state objects and the functions it points at live further
+  // down the file and are hoisted. Calling this returns a fresh snapshot
+  // of the two timers' plumbing each time, so switching one off doesn't
+  // leave stale references.
+  return [
+    { key: 'timer1', state: raceTimerState,  defaultY: 520,
+      inputId: 'racetime-url',    fontId: 'timer-font',  sizeId: 'timer-size',
+      colorId: 'timer-color',     bgId: 'timer-bg',      bgTransId: 'timer-bg-transparent',
+      connect: connectRaceTimer,  disconnect: disconnectRaceTimer,
+      updateStyle: updateTimerStyle, setLayer: setTimerLayer },
+    { key: 'timer2', state: raceTimerState2, defaultY: 620,
+      inputId: 'racetime-url-2',  fontId: 'timer2-font', sizeId: 'timer2-size',
+      colorId: 'timer2-color',    bgId: 'timer2-bg',     bgTransId: 'timer2-bg-transparent',
+      connect: connectRaceTimer2, disconnect: disconnectRaceTimer2,
+      updateStyle: updateTimerStyle2, setLayer: setTimer2Layer },
+  ];
+}
+
+function snapshotTimer(s) {
+  // Persistent fields only. active / startedAt / endedAt / interval /
+  // pollInterval are runtime, rebuilt from room on reconnect.
+  return {
+    room: s.room || '',
+    x: typeof s.x === 'number' ? s.x : null,
+    y: typeof s.y === 'number' ? s.y : null,
+    size: s.size || null,
+    color: s.color || null,
+    font: s.font || null,
+    bg: s.bg || null,
+    bgTransparent: !!s.bgTransparent,
+    layer: s.layer || null,
+  };
+}
+
+function recordLayerTimers() {
+  if (_switchingLayer) return;
+  const snap = {};
+  timerSpecs().forEach(spec => { snap[spec.key] = snapshotTimer(spec.state); });
+  layerTimers[activeLayer] = snap;
+}
+
+function applyLayerTimers(n) {
+  _switchingLayer = true;
+  try {
+    timerSpecs().forEach(spec => spec.disconnect());
+    const snap = layerTimers[n];
+    if (!snap) return;
+    timerSpecs().forEach(spec => {
+      const s = snap[spec.key];
+      if (!s) return;
+      if (typeof s.x === 'number') spec.state.x = s.x;
+      if (typeof s.y === 'number') spec.state.y = s.y;
+      const fontEl = document.getElementById(spec.fontId);
+      const sizeEl = document.getElementById(spec.sizeId);
+      const colorEl = document.getElementById(spec.colorId);
+      const bgEl = document.getElementById(spec.bgId);
+      const btEl = document.getElementById(spec.bgTransId);
+      if (s.font && fontEl) { fontEl.value = s.font; spec.state.font = s.font; }
+      if (s.size && sizeEl) { sizeEl.value = s.size; spec.state.size = s.size; }
+      if (s.color && colorEl) { colorEl.value = s.color; spec.state.color = s.color; }
+      if (s.bg && bgEl) { bgEl.value = s.bg; spec.state.bg = s.bg; }
+      if (btEl) { btEl.checked = !!s.bgTransparent; spec.state.bgTransparent = !!s.bgTransparent; }
+      spec.updateStyle();
+      if (s.layer) spec.setLayer(s.layer);
+      if (s.room) {
+        const urlEl = document.getElementById(spec.inputId);
+        if (urlEl) urlEl.value = s.room;
+        spec.connect();
+      }
+    });
+  } finally {
+    _switchingLayer = false;
+  }
+}
+
 // Parse a slot name like "slot3" / "text2" / "SLOT 3" into its kind and index.
 // Returns null when the string doesn't match either form. Bare numbers default
 // to the stream slot namespace since that's the common case.
@@ -1295,16 +1377,18 @@ function activateLayer(n) {
   if (!Number.isFinite(n)) return;
   n = Math.max(1, Math.min(99, Math.round(n)));
   if (n === activeLayer) return;
-  // Snapshot the OUTGOING layer's background first so a user who adjusts
-  // the frame while viewing layer 1 doesn't lose their changes when they
-  // switch to layer 2 and come back.
+  // Snapshot the OUTGOING layer's background + timers first so a user who
+  // adjusts the frame or racetime room while viewing layer 1 doesn't lose
+  // their changes when they switch to layer 2 and come back.
   recordLayerBackground();
+  recordLayerTimers();
   activeLayer = n;
-  // Swap the frame image / Zelda layout to this layer's stored background.
-  // If this layer has none stored, the current frame carries over, which is
-  // what the operator wants when they're building a new scene from whatever
-  // backdrop they already set up.
+  // Swap the frame image / Zelda layout AND the timer state to this layer's
+  // stored values. If this layer has none stored, the current state carries
+  // over — convenient for scenes the operator is still building from the
+  // backdrop and clock they already set up.
   applyLayerBackground(n);
+  applyLayerTimers(n);
   updateAllPanelDOM();
   renderLayerButtons();
   applyLayerAudio();
@@ -2544,6 +2628,7 @@ function getConfig() {
     streamPresets: streamPresets.slice(),
     zeldaLayout: currentZeldaLayout,
     layerBackgrounds: Object.assign({}, layerBackgrounds),
+    layerTimers: Object.assign({}, layerTimers),
     timer: {
       room: raceTimerState.room || '',
       x: Math.round(raceTimerState.x),
@@ -2577,6 +2662,12 @@ function getConfig() {
 }
 
 function saveConfig() {
+  // Keep layerTimers in sync on every save. Cheap (just snapshots two
+  // tiny objects) and avoids hunting down nine separate timer mutators to
+  // wire in individually. recordLayerTimers early-returns while
+  // _switchingLayer is set, so applyLayerTimers' own writes don't
+  // feed back into their own layer.
+  recordLayerTimers();
   try {
     localStorage.setItem('overlay-config', JSON.stringify(getConfig()));
   } catch (e) {}
@@ -2704,6 +2795,15 @@ function loadConfig() {
     // Make the just-restored activeLayer's background visible on screen.
     applyLayerBackground(activeLayer);
   }
+  if (config.layerTimers && typeof config.layerTimers === 'object') {
+    layerTimers = {};
+    Object.keys(config.layerTimers).forEach(k => {
+      const v = config.layerTimers[k];
+      if (v && typeof v === 'object') layerTimers[k] = v;
+    });
+    // Restoring the active layer's timers happens AFTER the global timer
+    // state is set below, so the frame below doesn't clobber it.
+  }
 
   // Restore timer 2 if saved
   if (config.timer2) {
@@ -2762,6 +2862,11 @@ function loadConfig() {
     const audioPanel = panels.find(p => p.channel === config.audioChannel);
     if (audioPanel) audioActiveId = audioPanel.id;
   }
+
+  // Per-layer timers override the globally-restored timer / timer2 state
+  // for whichever layer is active. Done AFTER connectRaceTimer has had its
+  // say above so the global connect leaves no stale interval behind.
+  if (layerTimers[activeLayer]) applyLayerTimers(activeLayer);
 
   renderAll();
 }
@@ -3963,6 +4068,14 @@ function applyConfig(config, user) {
       };
     });
     applyLayerBackground(activeLayer);
+  }
+  if (config.layerTimers && typeof config.layerTimers === 'object') {
+    layerTimers = {};
+    Object.keys(config.layerTimers).forEach(k => {
+      const v = config.layerTimers[k];
+      if (v && typeof v === 'object') layerTimers[k] = v;
+    });
+    if (layerTimers[activeLayer]) applyLayerTimers(activeLayer);
   }
 
   renderAll();
