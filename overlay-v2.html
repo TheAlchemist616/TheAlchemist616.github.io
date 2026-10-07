@@ -669,7 +669,7 @@
 
   <div class="sidebar-section">
     <h3>Panel Presets</h3>
-    <p style="font-size:11px; color:#888; margin:0 0 6px;">A preset snapshots one panel's channel, crop, style and layer. Loading drops it into a slot of your choosing and replaces whatever was there. Pick a target slot on the row, then Load. From chat: <code>!load &lt;name&gt; slot1</code>.</p>
+    <p style="font-size:11px; color:#888; margin:0 0 6px;">A preset snapshots one panel's channel, crop, style and layer. Loading drops it into a slot of your choosing and replaces whatever was there. Pick a target slot on the row, then Load. From chat: <code>!load &lt;name&gt; slot1</code>. If a streamer is active in <b>Streamer Permanent Link</b>, every save/delete auto-syncs to that gist so presets follow you across browsers and OBS.</p>
     <div class="sidebar-row" style="gap:4px;">
       <input type="text" id="preset-name" placeholder="preset name" style="flex:1;">
       <button class="btn btn-sm btn-primary" onclick="savePresetFromSelected()" title="Save the selected panel as a preset (needs a selected panel)">Save selected</button>
@@ -933,6 +933,61 @@ function loadPresetsLocal() {
     if (Array.isArray(arr)) streamPresets = arr;
   } catch (e) {}
 }
+
+// Debounced auto-push of the current config (which contains streamPresets)
+// to the active streamer's gist. Fires 1.5s after the last preset edit so a
+// burst of saves — rename, tweak color, hit Save again — collapses into one
+// API call. No-op if the operator hasn't set up Streamer Permanent Link yet;
+// localStorage is the fallback in that case.
+let _presetSyncTimer = null;
+let _presetSyncInFlight = false;
+function schedulePresetSync() {
+  if (!ghToken || !activeStreamer || !registry[activeStreamer]) return;
+  clearTimeout(_presetSyncTimer);
+  _presetSyncTimer = setTimeout(flushPresetSync, 1500);
+}
+async function flushPresetSync() {
+  _presetSyncTimer = null;
+  if (_presetSyncInFlight) {
+    // A push is already going out — reschedule so the latest state wins.
+    schedulePresetSync();
+    return;
+  }
+  if (!ghToken || !activeStreamer || !registry[activeStreamer]) return;
+  _presetSyncInFlight = true;
+  try {
+    const config = getConfig();
+    const r = await fetch('https://api.github.com/gists/' + registry[activeStreamer], {
+      method: 'PATCH', headers: ghHeaders(),
+      body: JSON.stringify({
+        files: { [GIST_FILENAME]: { content: JSON.stringify(config, null, 2) } },
+      }),
+    });
+    if (!r.ok) throw new Error('Status ' + r.status);
+    showToast('Presets synced to cloud');
+  } catch (e) {
+    showToast('Preset sync failed: ' + e.message);
+  } finally {
+    _presetSyncInFlight = false;
+  }
+}
+// Safety net — if the operator closes the tab inside the 1.5s debounce window,
+// try to flush the pending push synchronously via sendBeacon. Fire-and-forget,
+// best-effort; if it misses, localStorage still has the latest copy.
+window.addEventListener('beforeunload', () => {
+  if (!_presetSyncTimer) return;
+  if (!ghToken || !activeStreamer || !registry[activeStreamer]) return;
+  try {
+    const blob = new Blob([JSON.stringify({
+      files: { [GIST_FILENAME]: { content: JSON.stringify(getConfig(), null, 2) } },
+    })], { type: 'application/json' });
+    // sendBeacon can't attach custom headers, so fall back to a sync fetch
+    // keepalive. Both are best-effort during unload.
+    fetch('https://api.github.com/gists/' + registry[activeStreamer], {
+      method: 'PATCH', headers: ghHeaders(), body: blob, keepalive: true,
+    });
+  } catch (e) {}
+});
 
 // ============================================================
 // PRESETS — grid layouts
@@ -1291,6 +1346,7 @@ function savePresetByName(name, panelFields) {
   renderPresetList();
   savePresetsLocal();
   saveConfig();
+  schedulePresetSync();
   return true;
 }
 
@@ -1364,6 +1420,7 @@ function deletePresetByName(name) {
   renderPresetList();
   savePresetsLocal();
   saveConfig();
+  schedulePresetSync();
 }
 
 function renderPresetList() {
@@ -4275,12 +4332,19 @@ function init() {
   const params = new URLSearchParams(window.location.search);
   const gistParam = params.get('gist');
   const configParam = params.get('config');
+  // Loading rules:
+  // - Loading from a gist / cloud URL: the gist's presets are the source of
+  //   truth. Local presets are only a fallback for when the fetch fails
+  //   (offline, GitHub down) so the operator still sees SOMETHING.
+  // - Loading from localStorage only: that IS the source.
+  // This matches the "universal, not per-browser" ask — editing on one
+  // machine and refreshing on another should show the same presets.
   if (gistParam) {
     loadFromCloud(`https://gist.githubusercontent.com/raw/${gistParam}/${GIST_FILENAME}`, false)
-      .finally(() => { loadPresetsLocal(); renderPresetList(); });
+      .then(() => renderPresetList(), () => { loadPresetsLocal(); renderPresetList(); });
   } else if (configParam) {
     loadFromCloud(configParam, false)
-      .finally(() => { loadPresetsLocal(); renderPresetList(); });
+      .then(() => renderPresetList(), () => { loadPresetsLocal(); renderPresetList(); });
   } else {
     loadConfig();
     loadPresetsLocal();
