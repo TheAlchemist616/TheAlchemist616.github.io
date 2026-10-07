@@ -916,6 +916,24 @@ let dragState = null;
 let activeLayer = 1;
 let streamPresets = []; // [{name, type, channel, url, text, textFont, …, x, y, w, h, zoom, panX, panY, layer, layerNum}]
 
+// Presets persist to their OWN localStorage key, not just the main config
+// blob. The streamer-permanent-link workflow pulls the main config from a
+// gist that nobody is pushing presets back into, so saving them inside the
+// gist blob meant every page refresh clobbered local presets with the
+// gist's (empty) copy. A dedicated key stays untouched by cloud loads.
+const PRESETS_STORAGE_KEY = 'overlay-stream-presets';
+function savePresetsLocal() {
+  try { localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(streamPresets)); } catch (e) {}
+}
+function loadPresetsLocal() {
+  try {
+    const raw = localStorage.getItem(PRESETS_STORAGE_KEY);
+    if (!raw) return;
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) streamPresets = arr;
+  } catch (e) {}
+}
+
 // ============================================================
 // PRESETS — grid layouts
 // ============================================================
@@ -1271,6 +1289,7 @@ function savePresetByName(name, panelFields) {
   if (existing >= 0) streamPresets[existing] = preset;
   else streamPresets.push(preset);
   renderPresetList();
+  savePresetsLocal();
   saveConfig();
   return true;
 }
@@ -1343,6 +1362,7 @@ function deletePresetByName(name) {
   if (i < 0) return;
   streamPresets.splice(i, 1);
   renderPresetList();
+  savePresetsLocal();
   saveConfig();
 }
 
@@ -4247,11 +4267,15 @@ function init() {
   const gistParam = params.get('gist');
   const configParam = params.get('config');
   if (gistParam) {
-    loadFromCloud(`https://gist.githubusercontent.com/raw/${gistParam}/${GIST_FILENAME}`, false);
+    loadFromCloud(`https://gist.githubusercontent.com/raw/${gistParam}/${GIST_FILENAME}`, false)
+      .finally(() => { loadPresetsLocal(); renderPresetList(); });
   } else if (configParam) {
-    loadFromCloud(configParam, false);
+    loadFromCloud(configParam, false)
+      .finally(() => { loadPresetsLocal(); renderPresetList(); });
   } else {
     loadConfig();
+    loadPresetsLocal();
+    renderPresetList();
   }
 
   // Auto-connect chat if ?chat=channelname in URL
